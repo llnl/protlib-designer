@@ -17,7 +17,7 @@
 
 Welcome to the `protlib-designer` repository! This repository contains a lightweight python library for designing diverse protein libraries by seeding linear programming with deep mutational scanning data (or any other data that can be represented as a matrix of scores per single-point mutation). The software takes as input the score matrix, where each row corresponds to a mutation and each column corresponds to a different source of scores, and outputs a subset of mutations that **Pareto-minimizes the scores from the different sources while maximizing the diversity of the library**.
 
-The paper [Antibody Library Design by Seeding Linear Programming with Inverse Folding and Protein Language Models](https://www.biorxiv.org/content/10.1101/2024.11.03.621763v1) uses this software to design diverse antibody libraries by seeding linear programming with scores computed by Protein Language Models (PLMs) and Inverse Folding models.
+The paper [Combinatorial Optimization of Antibody Libraries via Constrained Integer Programming](https://www.biorxiv.org/content/10.1101/2024.11.03.621763v3) uses this software to design diverse antibody libraries by seeding linear programming with scores computed by Protein Language Models (PLMs) and Inverse Folding models (IFold). Check out the paper for more details on the method and its applications. Visit the blog post [here](https://landajuela.github.io/protlib_designer/) for a high-level overview of the method.
 
 <figure>
 <img src="https://raw.githubusercontent.com/LLNL/protlib-designer/main/images/method_diagram.png" alt="protlib-designer method diagram" width="100%">
@@ -187,15 +187,15 @@ If you use this software in your research, please cite the following paper:
 
 ```bibtex
 @article{Hayes2024.11.03.621763,
-  author       = {Hayes, Conor F. and Magana-Zook, Steven A. and Gon{\c{c}}alves, Andre and Solak, Ahmet Can and Faissol, Daniel and Landajuela, Mikel},
-  title        = {Antibody Library Design by Seeding Linear Programming with Inverse Folding and Protein Language Models},
+  author       = {Hayes, Conor F. and Goncalves, Andre R. and Magana-Zook, Steven and Pettit, Jacob and Solak, Ahmet Can and Faissol, Daniel and Landajuela, Mikel},
+  title        = {Combinatorial Optimization of Antibody Libraries via Constrained Integer Programming},
   journal      = {bioRxiv},
   year         = {2024},
   elocation-id = {2024.11.03.621763},
   doi          = {10.1101/2024.11.03.621763},
   publisher    = {Cold Spring Harbor Laboratory},
-  url          = {https://www.biorxiv.org/content/early/2024/11/03/2024.11.03.621763},
-  eprint       = {https://www.biorxiv.org/content/early/2024/11/03/2024.11.03.621763.full.pdf}
+  url          = {https://www.biorxiv.org/content/early/2025/12/31/2024.11.03.621763},
+  eprint       = {https://www.biorxiv.org/content/early/2025/12/31/2024.11.03.621763.full.pdf}
 }
 ```
 
