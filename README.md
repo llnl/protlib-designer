@@ -179,6 +179,17 @@ protlib-pipeline \
 
 ## LLM Reasoning Step
 
+<figure>
+<img src="https://raw.githubusercontent.com/LLNL/protlib-designer/main/images/llm_agent_pipeline.png" alt="protlib-designer method diagram" width="100%">
+<figcaption>
+<p class="figure-caption text-center">
+<em> The LLM Reasoning module ingests a contact graph, mutation scores, and mutation proposals to produce structured JSON guidance for downstream ILP optimization.
+</em>
+</p>
+</figcaption>
+</figure>
+
+
 The `protlib_designer.llm_reasoning` module adds an optional LLM-guided reasoning stage that can be run after scoring and before ILP optimization. It reads a contact graph (computed from a PDB or a text file), score summaries, and mutation proposals, then returns structured JSON guidance (avoid combinations, suggested mutations, derived scoring terms, constraints).
 
 Install the optional dependency group first:
