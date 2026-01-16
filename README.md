@@ -180,7 +180,7 @@ protlib-pipeline \
 ## LLM Reasoning Step
 
 <figure>
-<img src="https://lc.llnl.gov/gitlab/landajue/protlib-designer/-/blob/21a63f99103149483a429760551284fbd48b067f/images/llm_agent_pipeline.png" alt="protlib-designer method diagram" width="100%">
+<img src="./images/llm_agent_pipeline.png" alt="protlib-designer method diagram" width="100%">
 <figcaption>
 <p class="figure-caption text-center">
 <em> The LLM Reasoning module ingests a contact graph, mutation scores, and mutation proposals to produce structured JSON guidance for downstream ILP optimization.
