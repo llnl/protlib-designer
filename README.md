@@ -177,6 +177,75 @@ protlib-pipeline \
 
 > **Note:** You can pass a placeholder position `*{chain}{{start-end}}` to the `protlib-pipeline` command to specify a range of positions to mutate. For example, `*B{99-108}` will have the same effect as `WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108`. You can also pass a placeholder of the form `*{chain}*` to mutate all positions in the chain. For example, `*B*` will mutate all positions in chain B.
 
+## LLM Reasoning Step
+
+The `protlib_designer.llm_reasoning` module adds an optional LLM-guided reasoning stage that can be run after scoring and before ILP optimization. It reads a contact graph (computed from a PDB or a text file), score summaries, and mutation proposals, then returns structured JSON guidance (avoid combinations, suggested mutations, derived scoring terms, constraints).
+
+Install the optional dependency group first:
+
+```bash
+pip install -e .[llm]
+```
+
+Before running the LLM step, you need a `combined_scores.csv`. You can create it by running `protlib-pipeline` (it writes `combined_scores.csv` by default via `--intermediate-output`) or by using `protlib-plm-scorer`/`protlib-ifold-scorer` and merging the outputs on the `Mutation` column.
+
+You must provide an API key for LiteLLM:
+
+```bash
+export OPENAI_API_KEY=...
+export OPENAI_API_BASE=https://livai-api.llnl.gov/v1  # optional
+```
+
+Run with a PDB to compute contacts:
+
+```bash
+python -m protlib_designer.llm_reasoning \
+  --pdb-path ./example_data/1n8z.pdb \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
+  --scores-csv ./combined_scores.csv \
+  --output ./llm_guidance.json
+```
+
+Or provide a precomputed contact-graph text file:
+
+```bash
+python -m protlib_designer.llm_reasoning \
+  --contact-graph-text-file ./contact_graph.txt \
+  --scores-csv ./combined_scores.csv \
+  --mutation H35Y \
+  --mutation L50W \
+  --output ./llm_guidance.json
+```
+
+The output JSON is designed to be consumed by an ILP driver for additional constraints and derived objectives.
+
+### Pipeline With LLM Reasoning
+
+To run the full pipeline with the LLM step integrated between scoring and ILP, use the dedicated driver:
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --pdb-path ./example_data/1n8z.pdb \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
+  --plm-model-names facebook/esm2_t6_8M_UR50D \
+  --llm-output ./llm_guidance.json \
+  --llm-derived-score-column llm_derived_score
+```
+
+The command writes `llm_guidance.json`, appends any per-mutation derived scoring terms to the score matrix, and enforces LLM constraints during ILP. You can also call the script directly:
+
+```bash
+python scripts/run_pipeline_with_llm.py \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --pdb-path ./example_data/1n8z.pdb \
+  --plm-model-names facebook/esm2_t6_8M_UR50D
+```
+
 ## Contributing
 
 Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.

@@ -1,0 +1,1 @@
+"""Protein structure analysis helpers."""

@@ -56,6 +56,7 @@ class ILPGenerator(Generator):
         )
         self.debug = self.config.get("debug", 0)
         self.data_normalization = self.config.get("data_normalization", False)
+        self.llm_constraints = self.config.get("llm_constraints", [])
 
         self.many_hot_encoded_solutions = []
         self.list_of_solution_dicts = []
@@ -291,6 +292,63 @@ class ILPGenerator(Generator):
                     <= self.objective_constraints_param[index],
                     f"objective_constraint_{constraint}",
                 )
+        self._add_llm_constraints()
+
+    def _add_llm_constraints(self):
+        if not self.llm_constraints:
+            return
+        for index, constraint in enumerate(self.llm_constraints):
+            if not isinstance(constraint, dict):
+                continue
+            ctype = constraint.get("type")
+            mutations = constraint.get("mutations", [])
+            if not mutations:
+                continue
+            vars_for_mutations = []
+            missing = []
+            for mutation in mutations:
+                x_var = self.x_vars_dict.get(mutation)
+                if x_var is None:
+                    missing.append(mutation)
+                else:
+                    vars_for_mutations.append(x_var)
+            if missing and self.debug > 0:
+                logger.warning(
+                    f"LLM constraint references unknown mutations: {missing}"
+                )
+            if not vars_for_mutations:
+                continue
+            name_prefix = f"llm_{ctype}_{index}"
+            if ctype == "forbid_mutation":
+                for x_var in vars_for_mutations:
+                    self._add_constraint(
+                        x_var == 0, f"{name_prefix}_{x_var.getName()}", debug_level=1
+                    )
+            elif ctype == "require_mutation":
+                for x_var in vars_for_mutations:
+                    self._add_constraint(
+                        x_var == 1, f"{name_prefix}_{x_var.getName()}", debug_level=1
+                    )
+            elif ctype == "forbid_combination":
+                self._add_constraint(
+                    pulp.lpSum(vars_for_mutations) <= len(vars_for_mutations) - 1,
+                    name_prefix,
+                    debug_level=1,
+                )
+            elif ctype == "limit_count":
+                limit = constraint.get("limit")
+                if limit is None:
+                    logger.warning(
+                        f"LLM constraint {name_prefix} missing limit; skipping."
+                    )
+                    continue
+                self._add_constraint(
+                    pulp.lpSum(vars_for_mutations) <= int(limit),
+                    name_prefix,
+                    debug_level=1,
+                )
+            else:
+                logger.warning(f"Unsupported LLM constraint type: {ctype}")
 
     def set_objective(self):
 
