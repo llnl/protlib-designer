@@ -385,11 +385,10 @@ class ILPGenerator(Generator):
             self.problem += pulp.lpSum(self.weights * np.dot(self.A, self.x_vars))
 
         if self.debug > 1:
-            if iteration == 0:
-                dir_problems = Path(self.output_folder) / "ilp_problems"
-                # Create the directory to save the problem files to
-                if not dir_problems.exists():
-                    dir_problems.mkdir(parents=True, exist_ok=True)
+            dir_problems = Path(self.output_folder) / "ilp_problems"
+            # Create the directory to save the problem files to
+            if not dir_problems.exists():
+                dir_problems.mkdir(parents=True, exist_ok=True)
             # Save the problem to a file
             self.problem.writeLP(str(dir_problems / f"problem_{iteration}.lp"))
 
