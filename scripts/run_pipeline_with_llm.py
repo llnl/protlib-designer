@@ -303,6 +303,12 @@ def _build_contact_graph_text(
 @click.argument("positions", type=str, nargs=-1)
 @click.option("--sequence", type=str, help="Protein sequence for PLM scoring")
 @click.option("--pdb-path", type=str, help="Path to PDB file for IFold scoring")
+@click.option(
+    "--scores-csv",
+    type=click.Path(exists=True),
+    default=None,
+    help="Precomputed combined scores CSV (skips scoring).",
+)
 @click.option("--plm-model-names", type=str, multiple=True, help="PLM model names")
 @click.option("--plm-model-paths", type=str, multiple=True, help="PLM model paths")
 @click.option("--ifold-model-name", type=str, default=None, help="IFold model name")
@@ -452,6 +458,12 @@ def _build_contact_graph_text(
     help="Override OPENAI_API_BASE for LiteLLM.",
 )
 @click.option(
+    "--llm-guidance-input",
+    type=click.Path(exists=True),
+    default=None,
+    help="Path to precomputed LLM guidance JSON (skips LLM call).",
+)
+@click.option(
     "--llm-output",
     type=click.Path(exists=False),
     default="llm_guidance.json",
@@ -473,6 +485,7 @@ def run_pipeline_with_llm(
     positions,
     sequence,
     pdb_path,
+    scores_csv,
     plm_model_names,
     plm_model_paths,
     ifold_model_name,
@@ -511,6 +524,7 @@ def run_pipeline_with_llm(
     llm_max_mut_in_prompt,
     llm_max_edges_in_prompt,
     llm_api_base,
+    llm_guidance_input,
     llm_output,
     llm_derived_score_column,
     llm_scores_output,
@@ -519,19 +533,20 @@ def run_pipeline_with_llm(
 
     logger.info("Starting the Protlib Designer pipeline with LLM reasoning...")
 
-    sequence, positions = format_and_validate_pipeline_parameters(
-        sequence,
-        pdb_path,
-        positions,
-        plm_model_names,
-        plm_model_paths,
-        ifold_model_name,
-        ifold_model_path,
-    )
+    if not scores_csv:
+        sequence, positions = format_and_validate_pipeline_parameters(
+            sequence,
+            pdb_path,
+            positions,
+            plm_model_names,
+            plm_model_paths,
+            ifold_model_name,
+            ifold_model_path,
+        )
 
     dataframes = []
 
-    if plm_model_names or plm_model_paths:
+    if not scores_csv and (plm_model_names or plm_model_paths):
         logger.info("Running PLM Scorer...")
         logger.info(f"Sequence: {sequence}")
         logger.info(f"Positions: {positions}")
@@ -550,7 +565,7 @@ def run_pipeline_with_llm(
 
         logger.info(f"PLM scoring completed with {len(dataframes)} models")
 
-    if pdb_path:
+    if not scores_csv and pdb_path:
         logger.info("Running IFOLD Scorer...")
         logger.info(f"PDB Path: {pdb_path}")
         logger.info(f"Positions: {positions}")
@@ -573,28 +588,23 @@ def run_pipeline_with_llm(
         )
         logger.info(f"IFold scoring completed with {len(dataframes)} models")
 
-    if not dataframes:
-        logger.error("No scores were generated. Check your input parameters.")
-        return
+    if scores_csv:
+        final_df = pd.read_csv(scores_csv)
+        intermediate_output = scores_csv
+        logger.info(f"Loaded precomputed scores from {scores_csv}")
+    else:
+        if not dataframes:
+            logger.error("No scores were generated. Check your input parameters.")
+            return
 
-    logger.info("Combining scores from different models...")
-    final_df = combine_dataframes(dataframes)
-    if final_df is None:
-        return
-    logger.info("Scores combined successfully")
+        logger.info("Combining scores from different models...")
+        final_df = combine_dataframes(dataframes)
+        if final_df is None:
+            return
+        logger.info("Scores combined successfully")
 
-    final_df.to_csv(intermediate_output, index=False)
-    logger.info(f"Combined scores saved to {intermediate_output}")
-
-    contact_graph_text = _build_contact_graph_text(
-        pdb_path,
-        contact_graph_text_file,
-        heavy_chain_id,
-        light_chain_id,
-        antigen_chain_id,
-        distance_threshold,
-        llm_max_edges_in_prompt,
-    )
+        final_df.to_csv(intermediate_output, index=False)
+        logger.info(f"Combined scores saved to {intermediate_output}")
 
     scores_by_mutation = _scores_from_dataframe(final_df)
     mutation_proposals: List[str] = []
@@ -603,27 +613,41 @@ def run_pipeline_with_llm(
     if not mutation_proposals:
         mutation_proposals = list(scores_by_mutation.keys())
 
-    llm_config = LLMReasoningConfig(
-        model=llm_model,
-        temperature=llm_temperature,
-        max_tokens=llm_max_tokens,
-        max_mutations_in_prompt=llm_max_mut_in_prompt,
-        max_contact_edges_in_prompt=llm_max_edges_in_prompt,
-    )
+    if llm_guidance_input:
+        with open(llm_guidance_input, "r") as handle:
+            llm_output_data = json.load(handle)
+        logger.info(f"Loaded precomputed LLM guidance from {llm_guidance_input}")
+    else:
+        contact_graph_text = _build_contact_graph_text(
+            pdb_path,
+            contact_graph_text_file,
+            heavy_chain_id,
+            light_chain_id,
+            antigen_chain_id,
+            distance_threshold,
+            llm_max_edges_in_prompt,
+        )
 
-    llm_output_data = run_llm_reasoning(
-        contact_graph_text=contact_graph_text,
-        scores_by_mutation=scores_by_mutation,
-        mutation_proposals=mutation_proposals,
-        config=llm_config,
-        api_base=llm_api_base,
-    )
+        llm_config = LLMReasoningConfig(
+            model=llm_model,
+            temperature=llm_temperature,
+            max_tokens=llm_max_tokens,
+            max_mutations_in_prompt=llm_max_mut_in_prompt,
+            max_contact_edges_in_prompt=llm_max_edges_in_prompt,
+        )
+
+        llm_output_data = run_llm_reasoning(
+            contact_graph_text=contact_graph_text,
+            scores_by_mutation=scores_by_mutation,
+            mutation_proposals=mutation_proposals,
+            config=llm_config,
+            api_base=llm_api_base,
+        )
 
     if llm_output:
         with open(llm_output, "w") as handle:
             json.dump(llm_output_data, handle, indent=2)
         logger.info(f"Saved LLM guidance to {llm_output}")
-
     constraints = _collect_llm_constraints(llm_output_data)
     derived_scoring = llm_output_data.get("derived_scoring_function", {})
     llm_scores_path = llm_scores_output or intermediate_output

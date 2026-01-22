@@ -257,6 +257,25 @@ python scripts/run_pipeline_with_llm.py \
   --plm-model-names facebook/esm2_t6_8M_UR50D
 ```
 
+If you already have a precomputed guidance file, you can skip the LLM call:
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --pdb-path ./example_data/1n8z.pdb \
+  --plm-model-names facebook/esm2_t6_8M_UR50D \
+  --llm-guidance-input ./llm_guidance.json
+```
+
+If you already have precomputed scores, you can skip scoring entirely:
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --scores-csv ./combined_scores.csv \
+  --llm-guidance-input ./llm_guidance.json
+```
+
 ## Contributing
 
 Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
