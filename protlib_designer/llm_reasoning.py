@@ -473,6 +473,12 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
     help="Write JSON output to file (defaults to stdout).",
 )
 @click.option(
+    "--prompt-output",
+    type=click.Path(exists=False),
+    default=None,
+    help="Write the LLM prompt messages to a JSON file.",
+)
+@click.option(
     "--include-raw-response",
     is_flag=True,
     help="Include raw LLM response text in output JSON.",
@@ -493,6 +499,7 @@ def cli(
     max_edges_in_prompt: int,
     api_base: Optional[str],
     output: Optional[str],
+    prompt_output: Optional[str],
     include_raw_response: bool,
 ) -> None:
     """CLI entrypoint for LLM reasoning."""
@@ -529,6 +536,17 @@ def cli(
         max_mutations_in_prompt=max_mut_in_prompt,
         max_contact_edges_in_prompt=max_edges_in_prompt,
     )
+
+    if prompt_output:
+        prompt_messages = _build_messages(
+            contact_graph_text,
+            scores_by_mutation,
+            mutation_proposals,
+            config,
+        )
+        with open(prompt_output, "w") as handle:
+            json.dump(prompt_messages, handle, indent=2)
+        logger.info(f"Wrote LLM prompt messages to {prompt_output}")
 
     result = run_llm_reasoning(
         contact_graph_text=contact_graph_text,

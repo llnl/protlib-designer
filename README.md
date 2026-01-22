@@ -216,6 +216,7 @@ python -m protlib_designer.llm_reasoning \
   --light-chain-id A \
   --antigen-chain-id C \
   --scores-csv ./combined_scores.csv \
+  --prompt-output ./llm_prompt.json \
   --output ./llm_guidance.json
 ```
 
