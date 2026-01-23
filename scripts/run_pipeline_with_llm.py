@@ -16,6 +16,7 @@ from protlib_designer.llm_reasoning import (
     LLMReasoningConfig,
     _build_messages,
     build_contact_graph_text_from_pdb,
+    build_interface_profile_text_from_pdb,
     run_llm_reasoning,
 )
 from protlib_designer.scorer.ifold_scorer import IFOLDScorer
@@ -431,9 +432,7 @@ def _resolve_llm_output_dir(output_dir: Optional[str], llm_model: str) -> Path:
 @click.option(
     "--light-chain-id", type=str, default="L", help="Antibody light chain ID."
 )
-@click.option(
-    "--antigen-chain-id", type=str, default="A", help="Antigen chain ID."
-)
+@click.option("--antigen-chain-id", type=str, default="A", help="Antigen chain ID.")
 @click.option(
     "--distance-threshold",
     type=float,
@@ -447,9 +446,7 @@ def _resolve_llm_output_dir(output_dir: Optional[str], llm_model: str) -> Path:
 )
 @click.option("--llm-model", type=str, default="gpt-4o", help="LLM model name.")
 @click.option("--llm-temperature", type=float, default=0.2, help="LLM temperature.")
-@click.option(
-    "--llm-max-tokens", type=int, default=1500, help="Max tokens for LLM."
-)
+@click.option("--llm-max-tokens", type=int, default=1500, help="Max tokens for LLM.")
 @click.option(
     "--llm-max-mut-in-prompt",
     type=int,
@@ -461,6 +458,12 @@ def _resolve_llm_output_dir(output_dir: Optional[str], llm_model: str) -> Path:
     type=int,
     default=200,
     help="Maximum contact edges to include in LLM prompt.",
+)
+@click.option(
+    "--llm-reasoning-effort",
+    type=str,
+    default=None,
+    help="Override reasoning_effort for LLM (e.g., 'none', 'low', 'medium', 'high').",
 )
 @click.option(
     "--llm-api-base",
@@ -540,6 +543,7 @@ def run_pipeline_with_llm(
     llm_max_tokens,
     llm_max_mut_in_prompt,
     llm_max_edges_in_prompt,
+    llm_reasoning_effort,
     llm_api_base,
     llm_output_dir,
     llm_guidance_input,
@@ -646,6 +650,15 @@ def run_pipeline_with_llm(
     if not mutation_proposals:
         mutation_proposals = list(scores_by_mutation.keys())
 
+    llm_config = LLMReasoningConfig(
+        model=llm_model,
+        temperature=llm_temperature,
+        max_tokens=llm_max_tokens,
+        max_mutations_in_prompt=llm_max_mut_in_prompt,
+        max_contact_edges_in_prompt=llm_max_edges_in_prompt,
+        reasoning_effort=llm_reasoning_effort,
+    )
+
     contact_graph_text = _build_contact_graph_text(
         pdb_path,
         contact_graph_text_file,
@@ -656,16 +669,23 @@ def run_pipeline_with_llm(
         llm_max_edges_in_prompt,
     )
 
-    llm_config = LLMReasoningConfig(
-        model=llm_model,
-        temperature=llm_temperature,
-        max_tokens=llm_max_tokens,
-        max_mutations_in_prompt=llm_max_mut_in_prompt,
-        max_contact_edges_in_prompt=llm_max_edges_in_prompt,
-    )
+    interface_profile_text = ""
+    if pdb_path:
+        interface_profile_text = build_interface_profile_text_from_pdb(
+            pdb_path,
+            heavy_chain_id,
+            light_chain_id,
+            antigen_chain_id,
+            distance_threshold=distance_threshold,
+            max_pairs=llm_config.max_interaction_pairs_in_prompt,
+            max_contact_residues=llm_config.max_interface_residues_in_prompt,
+        )
+    elif contact_graph_text_file:
+        logger.warning("No PDB path provided; skipping interface interaction profile.")
 
     prompt_messages = _build_messages(
         contact_graph_text,
+        interface_profile_text,
         scores_by_mutation,
         mutation_proposals,
         llm_config,
@@ -689,6 +709,7 @@ def run_pipeline_with_llm(
     else:
         llm_output_data = run_llm_reasoning(
             contact_graph_text=contact_graph_text,
+            interface_profile_text=interface_profile_text,
             scores_by_mutation=scores_by_mutation,
             mutation_proposals=mutation_proposals,
             config=llm_config,

@@ -12,6 +12,10 @@ import pandas as pd
 
 from protlib_designer import logger
 from protlib_designer.structure.contact_graph import compute_contact_edges
+from protlib_designer.structure.interface_profile import (
+    build_interface_profile_text,
+    profile_antibody_antigen_interactions,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -79,12 +83,17 @@ class LLMReasoningConfig:
     max_tokens: int = 1500
     max_mutations_in_prompt: int = 50
     max_contact_edges_in_prompt: int = 200
+    max_interaction_pairs_in_prompt: int = 12
+    max_interface_residues_in_prompt: int = 10
+    reasoning_effort: Optional[str] = None
 
 
 def _chain_from_residue(residue: str) -> str:
-    """Extract the chain ID from a residue string like 'H35' or 'A102B'."""
+    """Extract the chain ID from a residue string like 'WH35' or 'H35'."""
     if not residue:
         return ""
+    if len(residue) >= 2 and residue[0].isalpha() and residue[1].isalpha():
+        return residue[1]
     match = re.match(r"([A-Za-z])", residue)
     return match[1] if match else ""
 
@@ -181,6 +190,34 @@ def build_contact_graph_text_from_pdb(
     return build_contact_graph_text(edges, max_edges=max_edges)
 
 
+def build_interface_profile_text_from_pdb(
+    pdb_file: str,
+    heavy_chain_id: str,
+    light_chain_id: str,
+    antigen_chain_id: str,
+    distance_threshold: float = 7.0,
+    max_pairs: int = 12,
+    max_contact_residues: int = 10,
+) -> str:
+    """Compute and render interaction profile text from a PDB file."""
+    edges = compute_contact_edges(
+        pdb_file,
+        heavy_chain_id,
+        light_chain_id,
+        antigen_chain_id,
+        distance_threshold=distance_threshold,
+    )
+    interaction_profile = profile_antibody_antigen_interactions(
+        pdb_file, heavy_chain_id, light_chain_id, antigen_chain_id
+    )
+    return build_interface_profile_text(
+        edges,
+        interaction_profile,
+        max_pairs=max_pairs,
+        max_contact_residues=max_contact_residues,
+    )
+
+
 def _scores_from_dataframe(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
     if "Mutation" not in df.columns:
         raise ValueError("Scores CSV must include a 'Mutation' column.")
@@ -257,9 +294,7 @@ def _format_scores_for_prompt(
         lines.append(f"- {mutation}: {formatted_scores}")
 
     if mutation_proposals:
-        if missing := [
-            m for m in mutation_proposals if m not in scores_by_mutation
-        ]:
+        if missing := [m for m in mutation_proposals if m not in scores_by_mutation]:
             lines.append("Mutation proposals without scores:")
             lines.extend(f"- {mutation}" for mutation in missing)
     return "\n".join(lines)
@@ -267,12 +302,15 @@ def _format_scores_for_prompt(
 
 def _build_messages(
     contact_graph_text: str,
+    interface_profile_text: str,
     scores_by_mutation: Dict[str, Dict[str, float]],
     mutation_proposals: Sequence[str],
     config: LLMReasoningConfig,
 ) -> List[Dict[str, str]]:
     if not contact_graph_text.strip():
         contact_graph_text = CONTACT_GRAPH_EMPTY_SENTINEL
+    if not interface_profile_text.strip():
+        interface_profile_text = "NO_INTERFACE_PROFILE"
 
     scores_text = _format_scores_for_prompt(
         scores_by_mutation, mutation_proposals, config.max_mutations_in_prompt
@@ -301,6 +339,15 @@ Contact graph:
 {contact_graph_text}
 >>>
 
+Interface interaction profile:
+<<<
+{interface_profile_text}
+>>>
+
+Residue notation:
+- Residue labels use WT+CHAIN+INDEX (e.g., WB99).
+- Mutation labels use WT+CHAIN+INDEX+MUT (e.g., WB99A).
+
 Scores and mutation proposals:
 <<<
 {scores_text}
@@ -312,7 +359,7 @@ Mutation proposals list:
 Task:
 - Identify mutation combinations likely to disrupt binding (avoid).
 - Suggest additional mutations to improve binding (mark novel suggestions).
-- Propose a derived scoring function using contact graph features.
+- Propose a derived scoring function using contact graph and interaction features.
 - Provide constraints suitable for ILP integration.
 - Add any extra protein-informed insights.
 
@@ -323,7 +370,7 @@ Output rules:
 - Use only mutations from the proposals/scores unless setting is_novel=true.
 - For avoid_combinations, include severity: "hard" or "soft".
 - For derived_scoring_function.terms, specify term_type as "per_mutation", "per_pair", or "global".
-- If no contacts are available, note this in warnings and avoid overconfident claims.
+- If no contacts or interaction data are available, note this in warnings and avoid overconfident claims.
 """
 
     return [
@@ -345,6 +392,15 @@ def _extract_json_from_text(text: str) -> str:
         raise ValueError("No JSON object found in LLM response.")
 
 
+def _truncate_text(text: Optional[str], limit: int = 2000) -> str:
+    if text is None:
+        return ""
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... [truncated {len(text) - limit} chars]"
+
+
 def _normalize_llm_output(payload: Any) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return dict(DEFAULT_LLM_OUTPUT)
@@ -363,8 +419,34 @@ def _normalize_llm_output(payload: Any) -> Dict[str, Any]:
     return normalized
 
 
+def _coerce_temperature(model: str, temperature: float) -> float:
+    model_id = model.split("/")[-1]
+    if model_id.startswith("gpt-5") and not model_id.startswith("gpt-5.1"):
+        if temperature != 1.0:
+            logger.warning(
+                "gpt-5 models only support temperature=1; overriding requested value."
+            )
+        return 1.0
+    return temperature
+
+
+def _resolve_reasoning_effort(
+    model: str, reasoning_effort: Optional[str]
+) -> Optional[str]:
+    model_id = model.split("/")[-1]
+    if reasoning_effort is not None:
+        return reasoning_effort
+    if model_id.startswith("gpt-5"):
+        logger.warning(
+            "gpt-5 defaults to reasoning_effort='none' to ensure text output; override if needed."
+        )
+        return "none"
+    return None
+
+
 def run_llm_reasoning(
     contact_graph_text: str,
+    interface_profile_text: str = "",
     scores_by_mutation: Optional[Dict[str, Dict[str, float]]] = None,
     mutation_proposals: Optional[Sequence[str]] = None,
     config: Optional[LLMReasoningConfig] = None,
@@ -382,7 +464,11 @@ def run_llm_reasoning(
     config = config or LLMReasoningConfig()
 
     messages = _build_messages(
-        contact_graph_text, scores_by_mutation, mutation_proposals, config
+        contact_graph_text,
+        interface_profile_text or "",
+        scores_by_mutation,
+        mutation_proposals,
+        config,
     )
 
     try:
@@ -390,19 +476,41 @@ def run_llm_reasoning(
     except ImportError as exc:
         raise ImportError("litellm is required to call the LLM.") from exc
 
-    response = completion(
-        model=config.model,
-        messages=messages,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-    )
-    raw_text = response.choices[0].message.content
+    temperature = _coerce_temperature(config.model, config.temperature)
+    reasoning_effort = _resolve_reasoning_effort(config.model, config.reasoning_effort)
+    completion_kwargs: Dict[str, Any] = {
+        "model": config.model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": config.max_tokens,
+    }
+    if reasoning_effort is not None and config.model.split("/")[-1].startswith("gpt-5"):
+        completion_kwargs["reasoning_effort"] = reasoning_effort
+
+    response = completion(**completion_kwargs)
+    raw_text = None
+    finish_reason = None
+    try:
+        raw_text = response.choices[0].message.content
+        finish_reason = response.choices[0].finish_reason
+    except Exception as exc:
+        logger.error(f"Unable to read LLM response content: {exc}")
+        logger.error(f"LLM response object: {response}")
+
+    if not raw_text:
+        logger.error(
+            "LLM response text is empty. "
+            f"finish_reason={finish_reason}, response={response}"
+        )
 
     try:
         json_text = _extract_json_from_text(raw_text)
         payload = json.loads(json_text)
     except Exception as exc:
-        logger.error(f"Failed to parse LLM JSON output: {exc}")
+        logger.error(
+            "Failed to parse LLM JSON output: "
+            f"{exc}. Raw response: {_truncate_text(raw_text)}"
+        )
         payload = dict(DEFAULT_LLM_OUTPUT)
         payload["warnings"] = payload.get("warnings", []) + [
             "LLM output was not valid JSON; using default empty guidance."
@@ -461,6 +569,12 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
     help="Maximum contact edges to include in prompt.",
 )
 @click.option(
+    "--reasoning-effort",
+    type=str,
+    default=None,
+    help="Override reasoning_effort for LLM (e.g., 'none', 'low', 'medium', 'high').",
+)
+@click.option(
     "--api-base",
     type=str,
     default=None,
@@ -503,6 +617,7 @@ def cli(
     max_tokens: int,
     max_mut_in_prompt: int,
     max_edges_in_prompt: int,
+    reasoning_effort: Optional[str],
     api_base: Optional[str],
     output: Optional[str],
     prompt_output: Optional[str],
@@ -511,6 +626,7 @@ def cli(
 ) -> None:
     """CLI entrypoint for LLM reasoning."""
     contact_graph_text = ""
+    interface_profile_text = ""
 
     if contact_graph_text_file:
         with open(contact_graph_text_file, "r") as handle:
@@ -527,6 +643,28 @@ def cli(
     else:
         logger.warning("No contact graph source provided; proceeding without contacts.")
 
+    config = LLMReasoningConfig(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        max_mutations_in_prompt=max_mut_in_prompt,
+        max_contact_edges_in_prompt=max_edges_in_prompt,
+        reasoning_effort=reasoning_effort,
+    )
+
+    if pdb_path:
+        interface_profile_text = build_interface_profile_text_from_pdb(
+            pdb_path,
+            heavy_chain_id,
+            light_chain_id,
+            antigen_chain_id,
+            distance_threshold=distance_threshold,
+            max_pairs=config.max_interaction_pairs_in_prompt,
+            max_contact_residues=config.max_interface_residues_in_prompt,
+        )
+    elif contact_graph_text_file:
+        logger.warning("No PDB path provided; skipping interface interaction profile.")
+
     scores_by_mutation: Dict[str, Dict[str, float]] = {}
     mutation_proposals: List[str] = list(mutations)
 
@@ -536,18 +674,11 @@ def cli(
         if not mutation_proposals:
             mutation_proposals = list(scores_by_mutation.keys())
 
-    config = LLMReasoningConfig(
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        max_mutations_in_prompt=max_mut_in_prompt,
-        max_contact_edges_in_prompt=max_edges_in_prompt,
-    )
-
     prompt_messages = None
     if prompt_output or prompt_text_output:
         prompt_messages = _build_messages(
             contact_graph_text,
+            interface_profile_text,
             scores_by_mutation,
             mutation_proposals,
             config,
@@ -568,6 +699,7 @@ def cli(
 
     result = run_llm_reasoning(
         contact_graph_text=contact_graph_text,
+        interface_profile_text=interface_profile_text,
         scores_by_mutation=scores_by_mutation,
         mutation_proposals=mutation_proposals,
         config=config,

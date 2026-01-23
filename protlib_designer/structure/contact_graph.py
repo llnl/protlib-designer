@@ -4,14 +4,16 @@ from Bio.PDB import NeighborSearch, PDBParser
 from Bio.PDB.Polypeptide import is_aa
 
 from protlib_designer import logger
+from protlib_designer.structure.interface_profile import map_residue_name_to_letter
 
 
 def _format_residue_id(residue) -> str:
-    """Format a residue as Chain+Position with insertion codes when present."""
+    """Format a residue as WT+Chain+Position with insertion codes when present."""
     chain_id = residue.get_parent().id
     resseq = residue.id[1]
     icode = residue.id[2].strip()
-    return f"{chain_id}{resseq}{icode}" if icode else f"{chain_id}{resseq}"
+    wt = map_residue_name_to_letter(residue.get_resname())
+    return f"{wt}{chain_id}{resseq}{icode}" if icode else f"{wt}{chain_id}{resseq}"
 
 
 def compute_contact_edges(
