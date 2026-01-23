@@ -217,6 +217,7 @@ python -m protlib_designer.llm_reasoning \
   --antigen-chain-id C \
   --scores-csv ./combined_scores.csv \
   --prompt-output ./llm_prompt.json \
+  --prompt-text-output ./llm_prompt.txt \
   --output ./llm_guidance.json
 ```
 
@@ -254,8 +255,26 @@ The command writes `llm_guidance.json`, appends any per-mutation derived scoring
 ```bash
 python scripts/run_pipeline_with_llm.py \
   WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
   --pdb-path ./example_data/1n8z.pdb \
   --plm-model-names facebook/esm2_t6_8M_UR50D
+```
+
+By default, LLM artifacts (combined scores and prompt/guidance files) are written to a directory named after the LLM model (e.g., `gpt-4o`). Override this with `--llm-output-dir`.
+
+Example:
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --pdb-path ./example_data/1n8z.pdb \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
+  --plm-model-names facebook/esm2_t6_8M_UR50D \
+  --llm-output-dir ./gpt-4o-prompt-results
 ```
 
 If you already have a precomputed guidance file, you can skip the LLM call:

@@ -479,6 +479,12 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
     help="Write the LLM prompt messages to a JSON file.",
 )
 @click.option(
+    "--prompt-text-output",
+    type=click.Path(exists=False),
+    default=None,
+    help="Write the LLM prompt content to a plain-text file.",
+)
+@click.option(
     "--include-raw-response",
     is_flag=True,
     help="Include raw LLM response text in output JSON.",
@@ -500,6 +506,7 @@ def cli(
     api_base: Optional[str],
     output: Optional[str],
     prompt_output: Optional[str],
+    prompt_text_output: Optional[str],
     include_raw_response: bool,
 ) -> None:
     """CLI entrypoint for LLM reasoning."""
@@ -537,16 +544,27 @@ def cli(
         max_contact_edges_in_prompt=max_edges_in_prompt,
     )
 
-    if prompt_output:
+    prompt_messages = None
+    if prompt_output or prompt_text_output:
         prompt_messages = _build_messages(
             contact_graph_text,
             scores_by_mutation,
             mutation_proposals,
             config,
         )
+    if prompt_output:
         with open(prompt_output, "w") as handle:
             json.dump(prompt_messages, handle, indent=2)
         logger.info(f"Wrote LLM prompt messages to {prompt_output}")
+    if prompt_text_output:
+        text_lines = []
+        for message in prompt_messages:
+            role = message.get("role", "unknown").upper()
+            content = message.get("content", "")
+            text_lines.append(f"{role}:\n{content}\n")
+        with open(prompt_text_output, "w") as handle:
+            handle.write("\n".join(text_lines))
+        logger.info(f"Wrote LLM prompt text to {prompt_text_output}")
 
     result = run_llm_reasoning(
         contact_graph_text=contact_graph_text,

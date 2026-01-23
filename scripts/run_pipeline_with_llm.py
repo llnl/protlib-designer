@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import json
+import re
 from functools import reduce
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,7 @@ from protlib_designer.filter.no_filter import NoFilter
 from protlib_designer.generator.ilp_generator import ILPGenerator
 from protlib_designer.llm_reasoning import (
     LLMReasoningConfig,
+    _build_messages,
     build_contact_graph_text_from_pdb,
     run_llm_reasoning,
 )
@@ -299,6 +301,15 @@ def _build_contact_graph_text(
     return ""
 
 
+def _sanitize_model_name(model_name: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", model_name).strip("_")
+    return sanitized or "llm_output"
+
+
+def _resolve_llm_output_dir(output_dir: Optional[str], llm_model: str) -> Path:
+    return Path(output_dir or _sanitize_model_name(llm_model))
+
+
 @click.command(context_settings=CONTEXT_SETTINGS)
 @click.argument("positions", type=str, nargs=-1)
 @click.option("--sequence", type=str, help="Protein sequence for PLM scoring")
@@ -458,6 +469,12 @@ def _build_contact_graph_text(
     help="Override OPENAI_API_BASE for LiteLLM.",
 )
 @click.option(
+    "--llm-output-dir",
+    type=click.Path(exists=False),
+    default=None,
+    help="Directory for combined scores and LLM artifacts (defaults to model name).",
+)
+@click.option(
     "--llm-guidance-input",
     type=click.Path(exists=True),
     default=None,
@@ -524,6 +541,7 @@ def run_pipeline_with_llm(
     llm_max_mut_in_prompt,
     llm_max_edges_in_prompt,
     llm_api_base,
+    llm_output_dir,
     llm_guidance_input,
     llm_output,
     llm_derived_score_column,
@@ -532,6 +550,19 @@ def run_pipeline_with_llm(
     """Run the pipeline with an LLM reasoning step between scoring and ILP."""
 
     logger.info("Starting the Protlib Designer pipeline with LLM reasoning...")
+
+    llm_output_dir_path = _resolve_llm_output_dir(llm_output_dir, llm_model)
+    llm_output_dir_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"LLM artifacts directory: {llm_output_dir_path}")
+
+    combined_scores_path = llm_output_dir_path / Path(intermediate_output).name
+    intermediate_output = str(combined_scores_path)
+    if llm_output:
+        llm_output = str(llm_output_dir_path / Path(llm_output).name)
+    llm_prompt_output = str(llm_output_dir_path / "llm_prompt.json")
+    llm_prompt_text_output = str(llm_output_dir_path / "llm_prompt.txt")
+    if llm_scores_output:
+        llm_scores_output = str(llm_output_dir_path / Path(llm_scores_output).name)
 
     if not scores_csv:
         sequence, positions = format_and_validate_pipeline_parameters(
@@ -590,8 +621,10 @@ def run_pipeline_with_llm(
 
     if scores_csv:
         final_df = pd.read_csv(scores_csv)
-        intermediate_output = scores_csv
-        logger.info(f"Loaded precomputed scores from {scores_csv}")
+        final_df.to_csv(intermediate_output, index=False)
+        logger.info(
+            f"Loaded precomputed scores from {scores_csv} and saved to {intermediate_output}"
+        )
     else:
         if not dataframes:
             logger.error("No scores were generated. Check your input parameters.")
@@ -613,29 +646,47 @@ def run_pipeline_with_llm(
     if not mutation_proposals:
         mutation_proposals = list(scores_by_mutation.keys())
 
+    contact_graph_text = _build_contact_graph_text(
+        pdb_path,
+        contact_graph_text_file,
+        heavy_chain_id,
+        light_chain_id,
+        antigen_chain_id,
+        distance_threshold,
+        llm_max_edges_in_prompt,
+    )
+
+    llm_config = LLMReasoningConfig(
+        model=llm_model,
+        temperature=llm_temperature,
+        max_tokens=llm_max_tokens,
+        max_mutations_in_prompt=llm_max_mut_in_prompt,
+        max_contact_edges_in_prompt=llm_max_edges_in_prompt,
+    )
+
+    prompt_messages = _build_messages(
+        contact_graph_text,
+        scores_by_mutation,
+        mutation_proposals,
+        llm_config,
+    )
+    with open(llm_prompt_output, "w") as handle:
+        json.dump(prompt_messages, handle, indent=2)
+    logger.info(f"Saved LLM prompt JSON to {llm_prompt_output}")
+    with open(llm_prompt_text_output, "w") as handle:
+        text_lines = []
+        for message in prompt_messages:
+            role = message.get("role", "unknown").upper()
+            content = message.get("content", "")
+            text_lines.append(f"{role}:\n{content}\n")
+        handle.write("\n".join(text_lines))
+    logger.info(f"Saved LLM prompt text to {llm_prompt_text_output}")
+
     if llm_guidance_input:
         with open(llm_guidance_input, "r") as handle:
             llm_output_data = json.load(handle)
         logger.info(f"Loaded precomputed LLM guidance from {llm_guidance_input}")
     else:
-        contact_graph_text = _build_contact_graph_text(
-            pdb_path,
-            contact_graph_text_file,
-            heavy_chain_id,
-            light_chain_id,
-            antigen_chain_id,
-            distance_threshold,
-            llm_max_edges_in_prompt,
-        )
-
-        llm_config = LLMReasoningConfig(
-            model=llm_model,
-            temperature=llm_temperature,
-            max_tokens=llm_max_tokens,
-            max_mutations_in_prompt=llm_max_mut_in_prompt,
-            max_contact_edges_in_prompt=llm_max_edges_in_prompt,
-        )
-
         llm_output_data = run_llm_reasoning(
             contact_graph_text=contact_graph_text,
             scores_by_mutation=scores_by_mutation,
