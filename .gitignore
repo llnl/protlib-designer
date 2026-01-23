@@ -9,3 +9,4 @@ dist
 plm_scores.csv
 ifold_scores.csv
 protlib_designer/_version.py
+*-prompt-results
