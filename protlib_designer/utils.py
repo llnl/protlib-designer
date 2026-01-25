@@ -90,23 +90,40 @@ def format_and_validate_protlib_designer_parameters(
         logger.error("max_arom_per_seq must be a positive integer.")
         exit()
 
-    if schedule_param is not None:
-        schedule_param = [int(val) for val in schedule_param.split(",")]
-    else:
+    if (
+        schedule_param is not None
+        and not str(schedule_param).strip()
+        or schedule_param is None
+    ):
         schedule_param = []
+    else:
+        schedule_param = [
+            int(val) for val in schedule_param.split(",") if val.strip()
+        ]
     validate_schedule_parameters(schedule, schedule_param)
 
-    if objective_constraints is not None:
-        objective_constraints = objective_constraints.split(",")
-    else:
+    if (
+        objective_constraints is not None
+        and not str(objective_constraints).strip()
+        or objective_constraints is None
+    ):
         objective_constraints = []
-
-    if objective_constraints_param is not None:
-        objective_constraints_param = [
-            float(val) for val in objective_constraints_param.split(",")
-        ]
     else:
+        objective_constraints = [
+            val for val in objective_constraints.split(",") if val.strip()
+        ]
+    if (
+        objective_constraints_param is not None
+        and not str(objective_constraints_param).strip()
+        or objective_constraints_param is None
+    ):
         objective_constraints_param = []
+    else:
+        objective_constraints_param = [
+            float(val)
+            for val in objective_constraints_param.split(",")
+            if val.strip()
+        ]
     validate_objective_constraints(objective_constraints, objective_constraints_param)
 
     data_df = pd.read_csv(data)
