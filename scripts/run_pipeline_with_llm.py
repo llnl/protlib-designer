@@ -19,8 +19,6 @@ from protlib_designer.llm_reasoning import (
     build_interface_profile_text_from_pdb,
     run_llm_reasoning,
 )
-from protlib_designer.scorer.ifold_scorer import IFOLDScorer
-from protlib_designer.scorer.plm_scorer import PLMScorer
 from protlib_designer.solution_manager import SolutionManager
 from protlib_designer.solver.generate_and_remove_solver import GenerateAndRemoveSolver
 from protlib_designer.utils import (
@@ -105,6 +103,8 @@ def append_plm_scores_to_dataframes(
     mapping: str = None,
 ):
     """Append PLM scores to the provided dataframes."""
+    from protlib_designer.scorer.plm_scorer import PLMScorer
+
     for model_name in plm_model_names:
         plm_scorer = PLMScorer(
             model_name=model_name,
@@ -138,6 +138,7 @@ def append_ifold_scores_to_dataframes(
     score_type: str = "minus_llr",
 ):
     """Append IFold scores to the provided dataframes."""
+    from protlib_designer.scorer.ifold_scorer import IFOLDScorer
 
     ifold_scorer = IFOLDScorer(
         seed=seed,
