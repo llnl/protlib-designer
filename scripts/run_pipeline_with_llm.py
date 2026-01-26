@@ -497,6 +497,11 @@ def _resolve_llm_output_dir(output_dir: Optional[str], llm_model: str) -> Path:
     help="Column name for derived scoring values.",
 )
 @click.option(
+    "--skip-llm-derived-score",
+    is_flag=True,
+    help="Skip adding or using the LLM-derived score column.",
+)
+@click.option(
     "--llm-scores-output",
     type=click.Path(exists=False),
     default=None,
@@ -550,6 +555,7 @@ def run_pipeline_with_llm(
     llm_guidance_input,
     llm_output,
     llm_derived_score_column,
+    skip_llm_derived_score,
     llm_scores_output,
 ):
     """Run the pipeline with an LLM reasoning step between scoring and ILP."""
@@ -722,8 +728,16 @@ def run_pipeline_with_llm(
             json.dump(llm_output_data, handle, indent=2)
         logger.info(f"Saved LLM guidance to {llm_output}")
     constraints = _collect_llm_constraints(llm_output_data)
-    derived_scoring = llm_output_data.get("derived_scoring_function", {})
+    derived_scoring = (
+        {} if skip_llm_derived_score else llm_output_data.get("derived_scoring_function", {})
+    )
     llm_scores_path = llm_scores_output or intermediate_output
+
+    if skip_llm_derived_score and llm_derived_score_column in final_df.columns:
+        final_df = final_df.drop(columns=[llm_derived_score_column])
+        logger.info(
+            f"Removed derived score column {llm_derived_score_column} from scores."
+        )
 
     final_df, added_llm_score = _apply_llm_derived_scoring(
         final_df, derived_scoring, llm_derived_score_column
