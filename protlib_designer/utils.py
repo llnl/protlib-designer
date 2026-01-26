@@ -180,11 +180,12 @@ def validate_schedule_parameters(schedule: int, schedule_param: list):
     schedule_param : list
         The scheduling parameters.
     """
-    if schedule == 0 and schedule_param:
-        logger.error(
-            "Scheduling = 0 needs no parameters. Please use 'schedule-param = none'."
-        )
-        exit()
+    if schedule == 0:
+        if schedule_param:
+            logger.warning(
+                "Scheduling = 0 ignores schedule-param values; dropping them."
+            )
+        return
 
     if schedule == 1 and len(schedule_param) != 2:
         logger.error(
