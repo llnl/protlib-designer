@@ -5,6 +5,7 @@ import statistics
 import warnings
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import click
@@ -21,6 +22,9 @@ warnings.filterwarnings("ignore")
 
 
 CONTACT_GRAPH_EMPTY_SENTINEL = "NO_CONTACTS"
+DEFAULT_LLM_GUIDANCE_FILENAME = "llm_guidance.json"
+DEFAULT_LLM_PROMPT_JSON_FILENAME = "llm_prompt.json"
+DEFAULT_LLM_PROMPT_TEXT_FILENAME = "llm_prompt.txt"
 
 DEFAULT_LLM_OUTPUT: Dict[str, Any] = {
     "schema_version": "1.0",
@@ -298,6 +302,14 @@ def _format_scores_for_prompt(
             lines.append("Mutation proposals without scores:")
             lines.extend(f"- {mutation}" for mutation in missing)
     return "\n".join(lines)
+
+
+def _resolve_output_path(
+    output_path: Optional[str], output_dir: Path, default_filename: str
+) -> str:
+    """Resolve an output path within a directory, preserving absolute paths."""
+    candidate = output_path or default_filename
+    return candidate if os.path.isabs(candidate) else str(output_dir / candidate)
 
 
 def _build_messages(
@@ -599,6 +611,15 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
     help="Write the LLM prompt content to a plain-text file.",
 )
 @click.option(
+    "--llm-output-dir",
+    type=click.Path(exists=False),
+    default=None,
+    help=(
+        "Directory to collect LLM artifacts (guidance and prompt files). "
+        "Relative output paths are placed under this directory."
+    ),
+)
+@click.option(
     "--include-raw-response",
     is_flag=True,
     help="Include raw LLM response text in output JSON.",
@@ -622,6 +643,7 @@ def cli(
     output: Optional[str],
     prompt_output: Optional[str],
     prompt_text_output: Optional[str],
+    llm_output_dir: Optional[str],
     include_raw_response: bool,
 ) -> None:
     """CLI entrypoint for LLM reasoning."""
@@ -651,6 +673,20 @@ def cli(
         max_contact_edges_in_prompt=max_edges_in_prompt,
         reasoning_effort=reasoning_effort,
     )
+
+    if llm_output_dir:
+        llm_output_dir_path = Path(llm_output_dir)
+        llm_output_dir_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"LLM artifacts directory: {llm_output_dir_path}")
+        output = _resolve_output_path(
+            output, llm_output_dir_path, DEFAULT_LLM_GUIDANCE_FILENAME
+        )
+        prompt_output = _resolve_output_path(
+            prompt_output, llm_output_dir_path, DEFAULT_LLM_PROMPT_JSON_FILENAME
+        )
+        prompt_text_output = _resolve_output_path(
+            prompt_text_output, llm_output_dir_path, DEFAULT_LLM_PROMPT_TEXT_FILENAME
+        )
 
     if pdb_path:
         interface_profile_text = build_interface_profile_text_from_pdb(

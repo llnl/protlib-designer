@@ -221,6 +221,20 @@ python -m protlib_designer.llm_reasoning \
   --output ./llm_guidance.json
 ```
 
+To collect all LLM artifacts in a single directory, use `--llm-output-dir` (it
+will write `llm_guidance.json`, `llm_prompt.json`, and `llm_prompt.txt` inside
+that directory by default):
+
+```bash
+python -m protlib_designer.llm_reasoning \
+  --pdb-path ./example_data/1n8z.pdb \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
+  --scores-csv ./combined_scores.csv \
+  --llm-output-dir ./gpt-5-prompt-results
+```
+
 Or provide a precomputed contact-graph text file:
 
 ```bash
