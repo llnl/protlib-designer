@@ -222,13 +222,27 @@ def build_interface_profile_text_from_pdb(
     )
 
 
+def _resolve_mutation_column(df: pd.DataFrame) -> str:
+    """Resolve the mutation column name from known variants."""
+    preferred_columns = ("Mutation", "MutationHL")
+    for column in preferred_columns:
+        if column in df.columns:
+            return column
+
+    lower_to_original = {column.lower(): column for column in df.columns}
+    for column in preferred_columns:
+        if column.lower() in lower_to_original:
+            return lower_to_original[column.lower()]
+
+    raise ValueError("Scores CSV must include a 'Mutation' or 'MutationHL' column.")
+
+
 def _scores_from_dataframe(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
-    if "Mutation" not in df.columns:
-        raise ValueError("Scores CSV must include a 'Mutation' column.")
-    score_columns = [col for col in df.columns if col != "Mutation"]
+    mutation_column = _resolve_mutation_column(df)
+    score_columns = [col for col in df.columns if col != mutation_column]
     scores_by_mutation: Dict[str, Dict[str, float]] = {}
     for _, row in df.iterrows():
-        mutation = str(row["Mutation"])
+        mutation = str(row[mutation_column])
         scores: Dict[str, float] = {}
         for column in score_columns:
             value = row[column]
