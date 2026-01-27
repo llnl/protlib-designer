@@ -25,6 +25,7 @@ CONTACT_GRAPH_EMPTY_SENTINEL = "NO_CONTACTS"
 DEFAULT_LLM_GUIDANCE_FILENAME = "llm_guidance.json"
 DEFAULT_LLM_PROMPT_JSON_FILENAME = "llm_prompt.json"
 DEFAULT_LLM_PROMPT_TEXT_FILENAME = "llm_prompt.txt"
+DEFAULT_LLM_DERIVED_SCORE_COLUMN = "llm_derived_score"
 
 DEFAULT_LLM_OUTPUT: Dict[str, Any] = {
     "schema_version": "1.0",
@@ -249,6 +250,51 @@ def _scores_from_dataframe(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
             scores[column] = float("nan") if pd.isna(value) else float(value)
         scores_by_mutation[mutation] = scores
     return scores_by_mutation
+
+
+def _apply_llm_derived_scoring(
+    df: pd.DataFrame,
+    derived_scoring: Dict[str, Any],
+    column_name: str,
+    mutation_column: str,
+) -> tuple[pd.DataFrame, bool]:
+    """Apply per-mutation derived scoring terms to a score dataframe."""
+    terms = derived_scoring.get("terms", []) if derived_scoring else []
+    per_mutation_terms = [
+        term
+        for term in terms
+        if isinstance(term, dict) and term.get("term_type") == "per_mutation"
+    ]
+    if not per_mutation_terms:
+        logger.info("No per-mutation derived scoring terms; skipping derived column.")
+        return df, False
+
+    updated = df.copy()
+    if column_name in updated.columns:
+        logger.warning(
+            f"Derived scoring column {column_name} already exists; overwriting."
+        )
+    updated[column_name] = 0.0
+    objective = (derived_scoring or {}).get("objective", "minimize")
+    multiplier = -1.0 if str(objective).lower() == "maximize" else 1.0
+
+    for term in per_mutation_terms:
+        weight = float(term.get("weight", 0.0)) * multiplier
+        mutations = term.get("mutations", [])
+        if not mutations:
+            continue
+        mask = updated[mutation_column].astype(str).isin(mutations)
+        updated.loc[mask, column_name] = updated.loc[mask, column_name] + weight
+
+    for term in terms:
+        if not isinstance(term, dict):
+            continue
+        term_type = term.get("term_type")
+        if term_type in {"per_pair", "global"}:
+            logger.warning(
+                f"Skipping derived scoring term_type={term_type}; not supported by linear objective."
+            )
+    return updated, True
 
 
 def _select_mutations_for_prompt(
@@ -634,6 +680,18 @@ CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
     ),
 )
 @click.option(
+    "--llm-derived-score-column",
+    type=str,
+    default=DEFAULT_LLM_DERIVED_SCORE_COLUMN,
+    help="Column name for per-mutation derived scoring values.",
+)
+@click.option(
+    "--llm-scores-output",
+    type=click.Path(exists=False),
+    default=None,
+    help="Optional output path for scores with the LLM-derived score column.",
+)
+@click.option(
     "--include-raw-response",
     is_flag=True,
     help="Include raw LLM response text in output JSON.",
@@ -658,11 +716,14 @@ def cli(
     prompt_output: Optional[str],
     prompt_text_output: Optional[str],
     llm_output_dir: Optional[str],
+    llm_derived_score_column: str,
+    llm_scores_output: Optional[str],
     include_raw_response: bool,
 ) -> None:
     """CLI entrypoint for LLM reasoning."""
     contact_graph_text = ""
     interface_profile_text = ""
+    llm_output_dir_path: Optional[Path] = None
 
     if contact_graph_text_file:
         with open(contact_graph_text_file, "r") as handle:
@@ -717,9 +778,13 @@ def cli(
 
     scores_by_mutation: Dict[str, Dict[str, float]] = {}
     mutation_proposals: List[str] = list(mutations)
+    scores_df: Optional[pd.DataFrame] = None
+    mutation_column: Optional[str] = None
 
     if scores_csv:
         df = pd.read_csv(scores_csv)
+        scores_df = df
+        mutation_column = _resolve_mutation_column(df)
         scores_by_mutation = _scores_from_dataframe(df)
         if not mutation_proposals:
             mutation_proposals = list(scores_by_mutation.keys())
@@ -763,6 +828,27 @@ def cli(
         logger.info(f"Wrote LLM guidance to {output}")
     else:
         click.echo(json.dumps(result, indent=2))
+
+    if scores_df is not None and mutation_column:
+        scores_output_path: Optional[str] = llm_scores_output
+        default_scores_filename = (
+            Path(scores_csv).name if scores_csv else "scores_with_llm.csv"
+        )
+        if llm_output_dir_path:
+            scores_output_path = _resolve_output_path(
+                scores_output_path, llm_output_dir_path, default_scores_filename
+            )
+
+        if scores_output_path:
+            derived_scoring = result.get("derived_scoring_function", {})
+            updated_df, _ = _apply_llm_derived_scoring(
+                scores_df,
+                derived_scoring,
+                llm_derived_score_column,
+                mutation_column,
+            )
+            updated_df.to_csv(scores_output_path, index=False)
+            logger.info(f"Wrote LLM-derived scores to {scores_output_path}")
 
 
 if __name__ == "__main__":

@@ -223,7 +223,9 @@ python -m protlib_designer.llm_reasoning \
 
 To collect all LLM artifacts in a single directory, use `--llm-output-dir` (it
 will write `llm_guidance.json`, `llm_prompt.json`, and `llm_prompt.txt` inside
-that directory by default):
+that directory by default). When `--scores-csv` is provided, it also writes a
+scores CSV with the LLM-derived objective column (by default using the same
+filename as the input scores CSV):
 
 ```bash
 python -m protlib_designer.llm_reasoning \
@@ -233,6 +235,16 @@ python -m protlib_designer.llm_reasoning \
   --antigen-chain-id C \
   --scores-csv ./combined_scores.csv \
   --llm-output-dir ./gpt-5-prompt-results
+```
+
+You can override the derived score column name and scores output path:
+
+```bash
+python -m protlib_designer.llm_reasoning \
+  --scores-csv ./combined_scores.csv \
+  --llm-output-dir ./gpt-5-prompt-results \
+  --llm-derived-score-column llm_derived_score \
+  --llm-scores-output combined_scores_with_llm.csv
 ```
 
 Or provide a precomputed contact-graph text file:
