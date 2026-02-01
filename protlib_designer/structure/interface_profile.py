@@ -1,6 +1,6 @@
 from collections import defaultdict
 from math import sqrt
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from Bio.PDB import PDBParser
 from Bio.PDB.Polypeptide import is_aa
@@ -50,8 +50,12 @@ def _iter_residues(chain) -> List[object]:
     return [res for res in chain.get_residues() if is_aa(res, standard=True)]
 
 
-def _format_residue_label(residue) -> str:
+def _format_residue_label(
+    residue, chain_id_map: Optional[Dict[str, str]] = None
+) -> str:
     chain_id = residue.get_parent().get_id()
+    if chain_id_map and chain_id in chain_id_map:
+        chain_id = chain_id_map[chain_id]
     res_id = residue.get_id()[1]
     insertion = residue.get_id()[2].strip()
     wt = map_residue_name_to_letter(residue.get_resname())
@@ -121,14 +125,17 @@ def find_hydrophobic_contacts(residues1, residues2, threshold: float = 5.0):
     return hydrophobic_contacts
 
 
-def _profile_pairwise_interactions(residues1, residues2):
+def _profile_pairwise_interactions(residues1, residues2, chain_id_map=None):
     h_bonds = find_hydrogen_bonds(residues1, residues2)
     s_bridges = find_salt_bridges(residues1, residues2)
     h_contacts = find_hydrophobic_contacts(residues1, residues2)
 
     def _format_pairs(pairs: Iterable[Tuple[object, object]]):
         formatted = [
-            (_format_residue_label(left), _format_residue_label(right))
+            (
+                _format_residue_label(left, chain_id_map=chain_id_map),
+                _format_residue_label(right, chain_id_map=chain_id_map),
+            )
             for left, right in pairs
         ]
         formatted.sort()
@@ -153,6 +160,7 @@ def profile_antibody_antigen_interactions(
     heavy_chain_id: str,
     light_chain_id: str,
     antigen_chain_id: str,
+    chain_id_map: Optional[Dict[str, str]] = None,
 ):
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("complex", pdb_file)
@@ -176,10 +184,10 @@ def profile_antibody_antigen_interactions(
 
     return {
         "heavy_antigen": _profile_pairwise_interactions(
-            heavy_residues, antigen_residues
+            heavy_residues, antigen_residues, chain_id_map=chain_id_map
         ),
         "light_antigen": _profile_pairwise_interactions(
-            light_residues, antigen_residues
+            light_residues, antigen_residues, chain_id_map=chain_id_map
         ),
     }
 

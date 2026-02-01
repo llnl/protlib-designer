@@ -17,6 +17,7 @@ from protlib_designer.llm_reasoning import (
     _build_messages,
     build_contact_graph_text_from_pdb,
     build_interface_profile_text_from_pdb,
+    _infer_chain_label_map,
     run_llm_reasoning,
 )
 from protlib_designer.solution_manager import SolutionManager
@@ -287,6 +288,7 @@ def _build_contact_graph_text(
     antigen_chain_id: str,
     distance_threshold: float,
     max_edges: int,
+    chain_id_map: Optional[Dict[str, str]] = None,
 ) -> str:
     if contact_graph_text_file:
         with open(contact_graph_text_file, "r") as handle:
@@ -299,6 +301,7 @@ def _build_contact_graph_text(
             antigen_chain_id,
             distance_threshold=distance_threshold,
             max_edges=max_edges,
+            chain_id_map=chain_id_map,
         )
     return ""
 
@@ -657,6 +660,13 @@ def run_pipeline_with_llm(
     if not mutation_proposals:
         mutation_proposals = list(scores_by_mutation.keys())
 
+    chain_id_map = _infer_chain_label_map(
+        mutation_proposals,
+        heavy_chain_id,
+        light_chain_id,
+        antigen_chain_id,
+    )
+
     llm_config = LLMReasoningConfig(
         model=llm_model,
         temperature=llm_temperature,
@@ -674,7 +684,12 @@ def run_pipeline_with_llm(
         antigen_chain_id,
         distance_threshold,
         llm_max_edges_in_prompt,
+        chain_id_map=chain_id_map,
     )
+    if contact_graph_text_file and chain_id_map:
+        logger.warning(
+            "Contact graph text file provided; chain label remapping was not applied."
+        )
 
     interface_profile_text = ""
     if pdb_path:
@@ -686,6 +701,7 @@ def run_pipeline_with_llm(
             distance_threshold=distance_threshold,
             max_pairs=llm_config.max_interaction_pairs_in_prompt,
             max_contact_residues=llm_config.max_interface_residues_in_prompt,
+            chain_id_map=chain_id_map,
         )
     elif contact_graph_text_file:
         logger.warning("No PDB path provided; skipping interface interaction profile.")

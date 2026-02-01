@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from Bio.PDB import NeighborSearch, PDBParser
 from Bio.PDB.Polypeptide import is_aa
@@ -7,9 +7,11 @@ from protlib_designer import logger
 from protlib_designer.structure.interface_profile import map_residue_name_to_letter
 
 
-def _format_residue_id(residue) -> str:
+def _format_residue_id(residue, chain_id_map: Optional[Dict[str, str]] = None) -> str:
     """Format a residue as WT+Chain+Position with insertion codes when present."""
     chain_id = residue.get_parent().id
+    if chain_id_map and chain_id in chain_id_map:
+        chain_id = chain_id_map[chain_id]
     resseq = residue.id[1]
     icode = residue.id[2].strip()
     wt = map_residue_name_to_letter(residue.get_resname())
@@ -22,6 +24,7 @@ def compute_contact_edges(
     light_chain_id: str,
     antigen_chain_id: str,
     distance_threshold: float = 7.0,
+    chain_id_map: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, float]]:
     """Compute antibody-antigen contact edges from a PDB file.
 
@@ -74,14 +77,14 @@ def compute_contact_edges(
     contacts: Dict[Tuple[str, str], float] = {}
 
     for ab_res in ab_residues:
-        ab_label = _format_residue_id(ab_res)
+        ab_label = _format_residue_id(ab_res, chain_id_map=chain_id_map)
         for ab_atom in ab_res.get_atoms():
             close_atoms = neighbor_search.search(
                 ab_atom.coord, distance_threshold, level="A"
             )
             for ag_atom in close_atoms:
                 ag_res = ag_atom.get_parent()
-                ag_label = _format_residue_id(ag_res)
+                ag_label = _format_residue_id(ag_res, chain_id_map=chain_id_map)
                 distance = float(ab_atom - ag_atom)
                 key = (ab_label, ag_label)
                 previous = contacts.get(key)

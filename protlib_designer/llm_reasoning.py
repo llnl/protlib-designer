@@ -183,6 +183,7 @@ def build_contact_graph_text_from_pdb(
     antigen_chain_id: str,
     distance_threshold: float = 7.0,
     max_edges: int = 200,
+    chain_id_map: Optional[Dict[str, str]] = None,
 ) -> str:
     """Compute and render contact graph text from a PDB file."""
     edges = compute_contact_edges(
@@ -191,6 +192,7 @@ def build_contact_graph_text_from_pdb(
         light_chain_id,
         antigen_chain_id,
         distance_threshold=distance_threshold,
+        chain_id_map=chain_id_map,
     )
     return build_contact_graph_text(edges, max_edges=max_edges)
 
@@ -203,6 +205,7 @@ def build_interface_profile_text_from_pdb(
     distance_threshold: float = 7.0,
     max_pairs: int = 12,
     max_contact_residues: int = 10,
+    chain_id_map: Optional[Dict[str, str]] = None,
 ) -> str:
     """Compute and render interaction profile text from a PDB file."""
     edges = compute_contact_edges(
@@ -211,9 +214,14 @@ def build_interface_profile_text_from_pdb(
         light_chain_id,
         antigen_chain_id,
         distance_threshold=distance_threshold,
+        chain_id_map=chain_id_map,
     )
     interaction_profile = profile_antibody_antigen_interactions(
-        pdb_file, heavy_chain_id, light_chain_id, antigen_chain_id
+        pdb_file,
+        heavy_chain_id,
+        light_chain_id,
+        antigen_chain_id,
+        chain_id_map=chain_id_map,
     )
     return build_interface_profile_text(
         edges,
@@ -221,6 +229,27 @@ def build_interface_profile_text_from_pdb(
         max_pairs=max_pairs,
         max_contact_residues=max_contact_residues,
     )
+
+
+def _infer_chain_label_map(
+    mutation_proposals: Sequence[str],
+    heavy_chain_id: str,
+    light_chain_id: str,
+    antigen_chain_id: str,
+) -> Dict[str, str]:
+    chain_letters = set()
+    for mutation in mutation_proposals:
+        if not mutation or len(mutation) < 2:
+            continue
+        if mutation[0].isalpha() and mutation[1].isalpha():
+            chain_letters.add(mutation[1])
+
+    chain_id_map: Dict[str, str] = {}
+    if "H" in chain_letters and heavy_chain_id not in chain_letters:
+        chain_id_map[heavy_chain_id] = "H"
+    if "L" in chain_letters and light_chain_id not in chain_letters:
+        chain_id_map[light_chain_id] = "L"
+    return chain_id_map
 
 
 def _resolve_mutation_column(df: pd.DataFrame) -> str:
@@ -724,21 +753,27 @@ def cli(
     contact_graph_text = ""
     interface_profile_text = ""
     llm_output_dir_path: Optional[Path] = None
+    chain_id_map: Dict[str, str] = {}
 
-    if contact_graph_text_file:
-        with open(contact_graph_text_file, "r") as handle:
-            contact_graph_text = handle.read()
-    elif pdb_path:
-        contact_graph_text = build_contact_graph_text_from_pdb(
-            pdb_path,
-            heavy_chain_id,
-            light_chain_id,
-            antigen_chain_id,
-            distance_threshold=distance_threshold,
-            max_edges=max_edges_in_prompt,
-        )
-    else:
-        logger.warning("No contact graph source provided; proceeding without contacts.")
+    scores_by_mutation: Dict[str, Dict[str, float]] = {}
+    mutation_proposals: List[str] = list(mutations)
+    scores_df: Optional[pd.DataFrame] = None
+    mutation_column: Optional[str] = None
+
+    if scores_csv:
+        df = pd.read_csv(scores_csv)
+        scores_df = df
+        mutation_column = _resolve_mutation_column(df)
+        scores_by_mutation = _scores_from_dataframe(df)
+        if not mutation_proposals:
+            mutation_proposals = list(scores_by_mutation.keys())
+
+    chain_id_map = _infer_chain_label_map(
+        mutation_proposals,
+        heavy_chain_id,
+        light_chain_id,
+        antigen_chain_id,
+    )
 
     config = LLMReasoningConfig(
         model=model,
@@ -763,6 +798,26 @@ def cli(
             prompt_text_output, llm_output_dir_path, DEFAULT_LLM_PROMPT_TEXT_FILENAME
         )
 
+    if contact_graph_text_file:
+        with open(contact_graph_text_file, "r") as handle:
+            contact_graph_text = handle.read()
+        if chain_id_map:
+            logger.warning(
+                "Contact graph text file provided; chain label remapping was not applied."
+            )
+    elif pdb_path:
+        contact_graph_text = build_contact_graph_text_from_pdb(
+            pdb_path,
+            heavy_chain_id,
+            light_chain_id,
+            antigen_chain_id,
+            distance_threshold=distance_threshold,
+            max_edges=max_edges_in_prompt,
+            chain_id_map=chain_id_map,
+        )
+    else:
+        logger.warning("No contact graph source provided; proceeding without contacts.")
+
     if pdb_path:
         interface_profile_text = build_interface_profile_text_from_pdb(
             pdb_path,
@@ -772,22 +827,10 @@ def cli(
             distance_threshold=distance_threshold,
             max_pairs=config.max_interaction_pairs_in_prompt,
             max_contact_residues=config.max_interface_residues_in_prompt,
+            chain_id_map=chain_id_map,
         )
     elif contact_graph_text_file:
         logger.warning("No PDB path provided; skipping interface interaction profile.")
-
-    scores_by_mutation: Dict[str, Dict[str, float]] = {}
-    mutation_proposals: List[str] = list(mutations)
-    scores_df: Optional[pd.DataFrame] = None
-    mutation_column: Optional[str] = None
-
-    if scores_csv:
-        df = pd.read_csv(scores_csv)
-        scores_df = df
-        mutation_column = _resolve_mutation_column(df)
-        scores_by_mutation = _scores_from_dataframe(df)
-        if not mutation_proposals:
-            mutation_proposals = list(scores_by_mutation.keys())
 
     prompt_messages = None
     if prompt_output or prompt_text_output:
