@@ -20,6 +20,10 @@ from protlib_designer.llm_reasoning import (
 warnings.filterwarnings("ignore")
 
 CONTEXT_SETTINGS = dict(help_option_names=["-h", "--help"])
+DEFAULT_LLM_LIBRARY_FILENAME = "llm_library.csv"
+DEFAULT_LLM_PROMPT_JSON_FILENAME = "llm_prompt.json"
+DEFAULT_LLM_PROMPT_TEXT_FILENAME = "llm_prompt.txt"
+DEFAULT_LLM_RESPONSE_JSON_FILENAME = "llm_response.json"
 
 
 def _coerce_temperature(model: str, temperature: float) -> float:
@@ -33,18 +37,41 @@ def _coerce_temperature(model: str, temperature: float) -> float:
     return temperature
 
 
+def _is_azure_endpoint(api_base: Optional[str]) -> bool:
+    base = api_base or os.environ.get("OPENAI_API_BASE", "")
+    if not base:
+        return False
+    base = base.lower()
+    return "azure" in base or "openai.azure.com" in base
+
+
 def _resolve_reasoning_effort(
-    model: str, reasoning_effort: Optional[str]
+    model: str, reasoning_effort: Optional[str], api_base: Optional[str]
 ) -> Optional[str]:
     model_id = model.split("/")[-1]
     if reasoning_effort is not None:
         return reasoning_effort
     if model_id.startswith("gpt-5"):
+        if _is_azure_endpoint(api_base):
+            logger.warning(
+                "Azure gpt-5 requires reasoning_effort in {'low','medium','high'}; "
+                "defaulting to 'low'."
+            )
+            return "low"
         logger.warning(
             "gpt-5 defaults to reasoning_effort='none' to ensure text output; override if needed."
         )
         return "none"
     return None
+
+
+def _sanitize_model_name(model_name: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", model_name).strip("_")
+    return sanitized or "llm_output"
+
+
+def _resolve_output_dir(output_dir: Optional[str], model: str) -> str:
+    return output_dir or f"{_sanitize_model_name(model)}_llm_generation"
 
 
 def _build_library_prompt(
@@ -105,6 +132,8 @@ Task:
 - Each line should be a comma-separated list of single mutations (no spaces).
 - Use only the provided mutation proposals/scores.
 - Ensure diversity (vary positions and combinations; avoid duplicates).
+- Ensure every mutation includes the final mutant amino acid (e.g., YH105W, not YH105).
+- Every mutation token must match WT+CHAIN+INDEX+MUT (regex: ^[A-Z][A-Z][0-9]+[A-Z]$).
 
 Output format:
 Mutation
@@ -154,6 +183,47 @@ def _extract_mutation_lines(text: str) -> List[str]:
             line = line[1:-1]
         lines.append(line.strip())
     return lines
+
+
+def _validate_mutation_line(line: str) -> bool:
+    token_pattern = re.compile(r"^[A-Z][A-Z][0-9]+[A-Z]$")
+    tokens = [token.strip() for token in line.split(",") if token.strip()]
+    if not tokens:
+        return False
+    return all(token_pattern.match(token) for token in tokens)
+
+
+def _extract_response_text(response: Any) -> str:
+    try:
+        content = response.choices[0].message.content
+        if content:
+            return content
+    except Exception:
+        pass
+    try:
+        message = response.choices[0].message
+        if isinstance(message, dict):
+            content = message.get("content")
+            if content:
+                return content
+    except Exception:
+        pass
+    return ""
+
+
+def _dump_response(response: Any, output_path: str) -> None:
+    try:
+        if hasattr(response, "model_dump"):
+            payload = response.model_dump()
+        elif hasattr(response, "dict"):
+            payload = response.dict()
+        else:
+            payload = str(response)
+        with open(output_path, "w") as handle:
+            json.dump(payload, handle, indent=2, default=str)
+        logger.info(f"Wrote raw LLM response to {output_path}")
+    except Exception as exc:
+        logger.warning(f"Failed to write raw LLM response: {exc}")
 
 
 @click.command(context_settings=CONTEXT_SETTINGS)
@@ -218,10 +288,16 @@ def _extract_mutation_lines(text: str) -> List[str]:
     help="Override OPENAI_API_BASE for LiteLLM.",
 )
 @click.option(
+    "--output-dir",
+    type=click.Path(exists=False),
+    default=None,
+    help="Directory to write outputs (defaults to a sanitized model name).",
+)
+@click.option(
     "--output",
     type=click.Path(exists=False),
-    default="llm_library.csv",
-    help="Write CSV output to file.",
+    default=DEFAULT_LLM_LIBRARY_FILENAME,
+    help="Write CSV output to file (relative to output dir unless absolute).",
 )
 @click.option(
     "--dry-run",
@@ -245,6 +321,7 @@ def run_llm_library_generator(
     max_edges_in_prompt: int,
     reasoning_effort: Optional[str],
     api_base: Optional[str],
+    output_dir: Optional[str],
     output: str,
     dry_run: bool,
 ) -> None:
@@ -304,6 +381,33 @@ def run_llm_library_generator(
         max_mut_in_prompt,
     )
 
+    resolved_output_dir = _resolve_output_dir(output_dir, model)
+    os.makedirs(resolved_output_dir, exist_ok=True)
+    output_path = (
+        output if os.path.isabs(output) else os.path.join(resolved_output_dir, output)
+    )
+    prompt_json_path = os.path.join(
+        resolved_output_dir, DEFAULT_LLM_PROMPT_JSON_FILENAME
+    )
+    prompt_text_path = os.path.join(
+        resolved_output_dir, DEFAULT_LLM_PROMPT_TEXT_FILENAME
+    )
+    response_json_path = os.path.join(
+        resolved_output_dir, DEFAULT_LLM_RESPONSE_JSON_FILENAME
+    )
+
+    with open(prompt_json_path, "w") as handle:
+        json.dump(prompt_messages, handle, indent=2)
+    text_lines = []
+    for message in prompt_messages:
+        role = message.get("role", "unknown").upper()
+        content = message.get("content", "")
+        text_lines.append(f"{role}:\n{content}\n")
+    with open(prompt_text_path, "w") as handle:
+        handle.write("\n".join(text_lines))
+    logger.info(f"Wrote LLM prompt messages to {prompt_json_path}")
+    logger.info(f"Wrote LLM prompt text to {prompt_text_path}")
+
     if dry_run:
         click.echo(prompt_messages[0]["content"])
         click.echo("")
@@ -321,7 +425,7 @@ def run_llm_library_generator(
         raise ImportError("litellm is required to call the LLM.") from exc
 
     temperature = _coerce_temperature(model, temperature)
-    reasoning_effort = _resolve_reasoning_effort(model, reasoning_effort)
+    reasoning_effort = _resolve_reasoning_effort(model, reasoning_effort, api_base)
     completion_kwargs: Dict[str, Any] = {
         "model": model,
         "messages": prompt_messages,
@@ -332,18 +436,35 @@ def run_llm_library_generator(
         completion_kwargs["reasoning_effort"] = reasoning_effort
 
     response = completion(**completion_kwargs)
-    raw_text = response.choices[0].message.content
+    _dump_response(response, response_json_path)
+    raw_text = _extract_response_text(response)
     mutation_lines = _extract_mutation_lines(raw_text)
 
     if not mutation_lines:
-        logger.error("No mutation lines parsed from LLM response.")
+        finish_reason = None
+        try:
+            finish_reason = response.choices[0].finish_reason
+        except Exception:
+            pass
+        logger.error(
+            "No mutation lines parsed from LLM response. finish_reason=%s",
+            finish_reason,
+        )
+    else:
+        invalid_lines = [line for line in mutation_lines if not _validate_mutation_line(line)]
+        if invalid_lines:
+            logger.warning(
+                "Dropping %d invalid mutation lines that do not match WT+CHAIN+INDEX+MUT.",
+                len(invalid_lines),
+            )
+            mutation_lines = [line for line in mutation_lines if line not in invalid_lines]
 
     if len(mutation_lines) > num_mutants:
         mutation_lines = mutation_lines[:num_mutants]
 
     output_df = pd.DataFrame({"Mutation": mutation_lines})
-    output_df.to_csv(output, index=False)
-    logger.info(f"Wrote LLM-generated library to {output}")
+    output_df.to_csv(output_path, index=False)
+    logger.info(f"Wrote LLM-generated library to {output_path}")
 
 
 if __name__ == "__main__":
