@@ -420,6 +420,11 @@ def _resolve_llm_output_dir(output_dir: Optional[str], llm_model: str) -> Path:
 )
 @click.option("--debug", default=0, type=int, help="Debug level")
 @click.option(
+    "--save-ilp-problems",
+    is_flag=True,
+    help="Save generated ILP problems as .lp files (equivalent to --debug 2 for ILP generation).",
+)
+@click.option(
     "--data-normalization",
     default=False,
     type=bool,
@@ -540,6 +545,7 @@ def run_pipeline_with_llm(
     objective_constraints_param,
     weighted_multi_objective,
     debug,
+    save_ilp_problems,
     data_normalization,
     contact_graph_text_file,
     heavy_chain_id,
@@ -765,6 +771,12 @@ def run_pipeline_with_llm(
         logger.info(f"Scores saved to {llm_scores_path} without LLM-derived column")
 
     logger.info("Running Protlib Designer...")
+
+    if save_ilp_problems and debug < 2:
+        logger.info(
+            "Enabling ILP problem saving; raising debug level from %d to 2.", debug
+        )
+        debug = 2
 
     config, _ = format_and_validate_protlib_designer_parameters(
         output_folder,
