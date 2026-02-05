@@ -95,6 +95,7 @@ def _build_library_prompt(
         if mutation_proposals
         else "None provided."
     )
+    example_lines = _build_example_lines(mutation_proposals, num_mutants)
 
     system_message = (
         "You are a protein design assistant. Output only CSV with a single column "
@@ -135,11 +136,9 @@ Task:
 - Ensure every mutation includes the final mutant amino acid (e.g., YH105W, not YH105).
 - Every mutation token must match WT+CHAIN+INDEX+MUT (regex: ^[A-Z][A-Z][0-9]+[A-Z]$).
 
-Output format:
+Output format (use only mutations from the provided list):
 Mutation
-"WH99D,DH102Y,FH104Y,YH105W,MH107F"
-"WH99D,GH100Y,DH102Y,FH104Y,YH105W"
-"WH99E,GH100Y,DH102Y,FH104Y,YH105W"
+{example_lines}
 ... (exactly {num_mutants} lines)
 """
 
@@ -191,6 +190,37 @@ def _validate_mutation_line(line: str) -> bool:
     if not tokens:
         return False
     return all(token_pattern.match(token) for token in tokens)
+
+
+def _filter_lines_to_allowed_mutations(
+    lines: List[str], allowed: Sequence[str]
+) -> List[str]:
+    if not allowed:
+        return lines
+    allowed_set = set(allowed)
+    filtered = []
+    for line in lines:
+        tokens = [token.strip() for token in line.split(",") if token.strip()]
+        if tokens and all(token in allowed_set for token in tokens):
+            filtered.append(line)
+    return filtered
+
+
+def _build_example_lines(
+    mutation_proposals: Sequence[str], num_mutants: int
+) -> str:
+    if not mutation_proposals:
+        return '"WH99D,DH102Y,FH104Y,YH105W,MH107F"'
+    # Build 2 example lines from proposals to avoid leaking unrelated mutations.
+    proposals = list(dict.fromkeys(mutation_proposals))
+    line_len = min(5, len(proposals))
+    first = proposals[:line_len]
+    second = proposals[line_len : 2 * line_len] or first
+    example_lines = [
+        f"\"{','.join(first)}\"",
+        f"\"{','.join(second)}\"",
+    ]
+    return "\n".join(example_lines)
 
 
 def _extract_response_text(response: Any) -> str:
@@ -451,13 +481,26 @@ def run_llm_library_generator(
             finish_reason,
         )
     else:
-        invalid_lines = [line for line in mutation_lines if not _validate_mutation_line(line)]
+        invalid_lines = [
+            line for line in mutation_lines if not _validate_mutation_line(line)
+        ]
         if invalid_lines:
             logger.warning(
                 "Dropping %d invalid mutation lines that do not match WT+CHAIN+INDEX+MUT.",
                 len(invalid_lines),
             )
             mutation_lines = [line for line in mutation_lines if line not in invalid_lines]
+        if mutation_proposals:
+            filtered_lines = _filter_lines_to_allowed_mutations(
+                mutation_lines, mutation_proposals
+            )
+            dropped = len(mutation_lines) - len(filtered_lines)
+            if dropped:
+                logger.warning(
+                    "Dropping %d lines containing mutations not in the provided proposals.",
+                    dropped,
+                )
+            mutation_lines = filtered_lines
 
     if len(mutation_lines) > num_mutants:
         mutation_lines = mutation_lines[:num_mutants]
