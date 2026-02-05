@@ -135,6 +135,7 @@ Task:
 - Ensure diversity (vary positions and combinations; avoid duplicates).
 - Ensure every mutation includes the final mutant amino acid (e.g., YH105W, not YH105).
 - Every mutation token must match WT+CHAIN+INDEX+MUT (regex: ^[A-Z][A-Z][0-9]+[A-Z]$).
+- Each mutant must include mutations at different positions (no repeated position within a line).
 
 Output format (use only mutations from the provided list):
 Mutation
