@@ -189,25 +189,19 @@ protlib-pipeline \
 </figcaption>
 </figure>
 
+`protlib_designer.llm_reasoning` is an optional step between scoring and ILP. It uses structure + scores to generate structured guidance (constraints + derived scoring) for the optimizer.
 
-The `protlib_designer.llm_reasoning` module adds an optional LLM-guided reasoning stage that can be run after scoring and before ILP optimization. It reads a contact graph (computed from a PDB or a text file), score summaries, and mutation proposals, then returns structured JSON guidance (avoid combinations, suggested mutations, derived scoring terms, constraints).
-
-Install the optional dependency group first:
+Install and configure:
 
 ```bash
 pip install -e .[llm]
-```
-
-Before running the LLM step, you need a `combined_scores.csv`. You can create it by running `protlib-pipeline` (it writes `combined_scores.csv` by default via `--intermediate-output`) or by using `protlib-plm-scorer`/`protlib-ifold-scorer` and merging the outputs on the `Mutation` column.
-
-You must provide an API key for LiteLLM:
-
-```bash
 export OPENAI_API_KEY=...
-export OPENAI_API_BASE=https://livai-api.llnl.gov/v1  # optional
+export OPENAI_API_BASE=...  # optional
 ```
 
-Run with a PDB to compute contacts:
+Minimum input is a `combined_scores.csv` with a `Mutation` column. You can produce it with `protlib-pipeline` (default `--intermediate-output`) or by merging scorer outputs on `Mutation`.
+
+Generate LLM guidance directly:
 
 ```bash
 python -m protlib_designer.llm_reasoning \
@@ -216,81 +210,18 @@ python -m protlib_designer.llm_reasoning \
   --light-chain-id A \
   --antigen-chain-id C \
   --scores-csv ./combined_scores.csv \
-  --prompt-output ./llm_prompt.json \
-  --prompt-text-output ./llm_prompt.txt \
-  --output ./llm_guidance.json
+  --llm-output-dir ./gpt-4o-prompt-results
 ```
 
-To collect all LLM artifacts in a single directory, use `--llm-output-dir` (it
-will write `llm_guidance.json`, `llm_prompt.json`, and `llm_prompt.txt` inside
-that directory by default). When `--scores-csv` is provided, it also writes a
-scores CSV with the LLM-derived objective column (by default using the same
-filename as the input scores CSV):
-
-```bash
-python -m protlib_designer.llm_reasoning \
-  --pdb-path ./example_data/1n8z.pdb \
-  --heavy-chain-id B \
-  --light-chain-id A \
-  --antigen-chain-id C \
-  --scores-csv ./combined_scores.csv \
-  --llm-output-dir ./gpt-5-prompt-results
-```
-
-You can override the derived score column name and scores output path:
-
-```bash
-python -m protlib_designer.llm_reasoning \
-  --scores-csv ./combined_scores.csv \
-  --llm-output-dir ./gpt-5-prompt-results \
-  --llm-derived-score-column llm_derived_score \
-  --llm-scores-output combined_scores_with_llm.csv
-```
-
-Or provide a precomputed contact-graph text file:
-
-```bash
-python -m protlib_designer.llm_reasoning \
-  --contact-graph-text-file ./contact_graph.txt \
-  --scores-csv ./combined_scores.csv \
-  --mutation H35Y \
-  --mutation L50W \
-  --output ./llm_guidance.json
-```
-
-The output JSON is designed to be consumed by an ILP driver for additional constraints and derived objectives.
+This writes:
+- `llm_guidance.json`
+- `llm_prompt.json`
+- `llm_prompt.txt`
+- scores CSV with the LLM-derived column (unless disabled)
 
 ### Pipeline With LLM Reasoning
 
-To run the full pipeline with the LLM step integrated between scoring and ILP, use the dedicated driver:
-
-```bash
-protlib-pipeline-llm \
-  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
-  --pdb-path ./example_data/1n8z.pdb \
-  --heavy-chain-id B \
-  --light-chain-id A \
-  --antigen-chain-id C \
-  --plm-model-names facebook/esm2_t6_8M_UR50D \
-  --llm-output ./llm_guidance.json \
-  --llm-derived-score-column llm_derived_score
-```
-
-The command writes `llm_guidance.json`, appends any per-mutation derived scoring terms to the score matrix, and enforces LLM constraints during ILP. You can also call the script directly:
-
-```bash
-python scripts/run_pipeline_with_llm.py \
-  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
-  --heavy-chain-id B \
-  --light-chain-id A \
-  --antigen-chain-id C \
-  --pdb-path ./example_data/1n8z.pdb \
-  --plm-model-names facebook/esm2_t6_8M_UR50D
-```
-
-By default, LLM artifacts (combined scores and prompt/guidance files) are written to a directory named after the LLM model (e.g., `gpt-4o`). Override this with `--llm-output-dir`.
-
-Example:
+Run full scoring + LLM + ILP:
 
 ```bash
 protlib-pipeline-llm \
@@ -303,7 +234,7 @@ protlib-pipeline-llm \
   --llm-output-dir ./gpt-4o-prompt-results
 ```
 
-If you already have a precomputed guidance file, you can skip the LLM call:
+Use precomputed guidance (skip LLM call):
 
 ```bash
 protlib-pipeline-llm \
@@ -313,7 +244,7 @@ protlib-pipeline-llm \
   --llm-guidance-input ./llm_guidance.json
 ```
 
-If you already have precomputed scores, you can skip scoring entirely:
+Use precomputed scores + guidance (skip scoring + LLM):
 
 ```bash
 protlib-pipeline-llm \
