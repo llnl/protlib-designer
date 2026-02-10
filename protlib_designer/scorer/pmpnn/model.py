@@ -803,7 +803,7 @@ class ProteinMPNN(nn.Module):
         )  # [numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
 
         new_decoding_order = []
-        for t_dec in list(decoding_order[0,].cpu().data.numpy()):
+        for t_dec in list(decoding_order[0].cpu().data.numpy()):
             if t_dec not in list(itertools.chain(*new_decoding_order)):
                 if list_a := [item for item in tied_pos if t_dec in item]:
                     new_decoding_order.append(list_a[0])
@@ -976,7 +976,7 @@ class ProteinMPNN(nn.Module):
                 order_mask = torch.zeros(chain_M.shape[1], device=device).float()
                 order_mask[idx] = 1.0
             decoding_order = torch.argsort(
-                (order_mask[None,] + 0.0001) * (torch.abs(randn))
+                (order_mask[None, :] + 0.0001) * (torch.abs(randn))
             )  # [numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
             mask_size = E_idx.shape[1]
             permutation_matrix_reverse = torch.nn.functional.one_hot(

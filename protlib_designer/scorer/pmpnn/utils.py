@@ -534,7 +534,7 @@ def tied_featurize(
         )
         chain_M[i, :] = m_pad
         chain_M_pos[i, :] = m_pos_pad
-        omit_AA_mask[i,] = omit_AA_mask_pad
+        omit_AA_mask[i, :] = omit_AA_mask_pad
 
         chain_encoding_pad = np.pad(
             chain_encoding,
