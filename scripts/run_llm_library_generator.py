@@ -207,9 +207,7 @@ def _filter_lines_to_allowed_mutations(
     return filtered
 
 
-def _build_example_lines(
-    mutation_proposals: Sequence[str], num_mutants: int
-) -> str:
+def _build_example_lines(mutation_proposals: Sequence[str], num_mutants: int) -> str:
     if not mutation_proposals:
         return '"WH99D,DH102Y,FH104Y,YH105W,MH107F"'
     # Build 2 example lines from proposals to avoid leaking unrelated mutations.
@@ -490,7 +488,9 @@ def run_llm_library_generator(
                 "Dropping %d invalid mutation lines that do not match WT+CHAIN+INDEX+MUT.",
                 len(invalid_lines),
             )
-            mutation_lines = [line for line in mutation_lines if line not in invalid_lines]
+            mutation_lines = [
+                line for line in mutation_lines if line not in invalid_lines
+            ]
         if mutation_proposals:
             filtered_lines = _filter_lines_to_allowed_mutations(
                 mutation_lines, mutation_proposals

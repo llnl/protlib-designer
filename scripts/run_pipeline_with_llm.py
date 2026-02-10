@@ -751,7 +751,9 @@ def run_pipeline_with_llm(
         logger.info(f"Saved LLM guidance to {llm_output}")
     constraints = _collect_llm_constraints(llm_output_data)
     derived_scoring = (
-        {} if skip_llm_derived_score else llm_output_data.get("derived_scoring_function", {})
+        {}
+        if skip_llm_derived_score
+        else llm_output_data.get("derived_scoring_function", {})
     )
     llm_scores_path = llm_scores_output or intermediate_output
 

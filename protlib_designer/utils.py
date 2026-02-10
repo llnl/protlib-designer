@@ -97,9 +97,7 @@ def format_and_validate_protlib_designer_parameters(
     ):
         schedule_param = []
     else:
-        schedule_param = [
-            int(val) for val in schedule_param.split(",") if val.strip()
-        ]
+        schedule_param = [int(val) for val in schedule_param.split(",") if val.strip()]
     validate_schedule_parameters(schedule, schedule_param)
 
     if (
@@ -120,9 +118,7 @@ def format_and_validate_protlib_designer_parameters(
         objective_constraints_param = []
     else:
         objective_constraints_param = [
-            float(val)
-            for val in objective_constraints_param.split(",")
-            if val.strip()
+            float(val) for val in objective_constraints_param.split(",") if val.strip()
         ]
     validate_objective_constraints(objective_constraints, objective_constraints_param)
 
