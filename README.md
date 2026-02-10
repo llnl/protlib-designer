@@ -112,7 +112,7 @@ Important notes about the input data:
 • The `score-1`, `score-2`, ..., `score-N` columns contain the scores computed by the deep learning models for each mutation. Typically, the scores are the negative log-likelihoods ratios of the mutant residue and the wild-type residue, computed by the deep learning model: 
 
 ```math
-s_{ij}^{\text{PLM}} =  -\log \left( \frac{p(x_i = a_j | w)}{p(x_i = w_i | w)} \right) =  -\log(p(x_i = a_j | w)) + \log(p(x_i = w_i | w)),
+s_{ij}^{\text{PLM}} = -\log \left(\frac{p(x_i = a_j | w)}{p(x_i = w_i | w)} \right) = -\log(p(x_i = a_j | w)) + \log(p(x_i = w_i | w)),
 ```
 
 where $w$ is the wild-type sequence, and $p(x_i = a_j | w)$ is the probability of the mutant residue $a_j$ at position $i$ given the wild-type sequence $w$ as estimated by a Protein Language Model (PLM) or an Inverse Folding model (or any other deep learning model). For example, in [Antibody Library Design by Seeding Linear Programming with Inverse Folding and Protein Language Models](https://www.biorxiv.org/content/10.1101/2024.11.03.621763v1), we used the scores computed by the [ProtBert](https://pubmed.ncbi.nlm.nih.gov/34232869/) and [AntiFold](https://arxiv.org/abs/2405.03370) models.
@@ -176,6 +176,82 @@ protlib-pipeline \
 ```
 
 > **Note:** You can pass a placeholder position `*{chain}{{start-end}}` to the `protlib-pipeline` command to specify a range of positions to mutate. For example, `*B{99-108}` will have the same effect as `WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108`. You can also pass a placeholder of the form `*{chain}*` to mutate all positions in the chain. For example, `*B*` will mutate all positions in chain B.
+
+## LLM Reasoning Step
+
+<figure>
+<img src="./images/llm_agent_pipeline.png" alt="protlib-designer method diagram" width="100%">
+<figcaption>
+<p class="figure-caption text-center">
+<em> The LLM Reasoning module ingests a contact graph, mutation scores, and mutation proposals to produce structured JSON guidance for downstream ILP optimization.
+</em>
+</p>
+</figcaption>
+</figure>
+
+`protlib_designer.llm_reasoning` is an optional step between scoring and ILP. It uses structure + scores to generate structured guidance (constraints + derived scoring) for the optimizer.
+
+Install and configure:
+
+```bash
+pip install -e .[llm]
+export OPENAI_API_KEY=...
+export OPENAI_API_BASE=...  # optional
+```
+
+Minimum input is a `combined_scores.csv` with a `Mutation` column. You can produce it with `protlib-pipeline` (default `--intermediate-output`) or by merging scorer outputs on `Mutation`.
+
+Generate LLM guidance directly:
+
+```bash
+python -m protlib_designer.llm_reasoning \
+  --pdb-path ./example_data/1n8z.pdb \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
+  --scores-csv ./combined_scores.csv \
+  --llm-output-dir ./gpt-4o-prompt-results
+```
+
+This writes:
+- `llm_guidance.json`
+- `llm_prompt.json`
+- `llm_prompt.txt`
+- scores CSV with the LLM-derived column (unless disabled)
+
+### Pipeline With LLM Reasoning
+
+Run full scoring + LLM + ILP:
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --pdb-path ./example_data/1n8z.pdb \
+  --heavy-chain-id B \
+  --light-chain-id A \
+  --antigen-chain-id C \
+  --plm-model-names facebook/esm2_t6_8M_UR50D \
+  --llm-output-dir ./gpt-4o-prompt-results
+```
+
+Use precomputed guidance (skip LLM call):
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --pdb-path ./example_data/1n8z.pdb \
+  --plm-model-names facebook/esm2_t6_8M_UR50D \
+  --llm-guidance-input ./llm_guidance.json
+```
+
+Use precomputed scores + guidance (skip scoring + LLM):
+
+```bash
+protlib-pipeline-llm \
+  WB99 GB100 GB101 DB102 GB103 FB104 YB105 AB106 MB107 DB108 \
+  --scores-csv ./combined_scores.csv \
+  --llm-guidance-input ./llm_guidance.json
+```
 
 ## Contributing
 
