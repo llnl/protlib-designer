@@ -253,6 +253,39 @@ protlib-pipeline-llm \
   --llm-guidance-input ./llm_guidance.json
 ```
 
+## Claude Code Skills
+
+This repository includes [Claude Code](https://docs.anthropic.com/en/docs/claude-code) slash commands that streamline common development workflows. Commands are defined in `.claude/commands/` and can be invoked directly from the Claude Code CLI.
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| **Lint** | `/lint` | Runs `black` formatter and `flake8` linter. Auto-fixes formatting issues and reports lint errors. |
+| **Test** | `/test` | Runs the `pytest` test suite. Optionally accepts a test name pattern to run specific tests. |
+| **Design Library** | `/design-library` | Runs `protlib-designer` on a score matrix CSV to generate a diverse protein library. Defaults to example data if no arguments are given. |
+| **Pipeline** | `/pipeline` | Runs the full end-to-end pipeline: PLM/inverse folding scoring followed by ILP-based library design. |
+| **Review** | `/review` | Reviews staged/unstaged git changes for correctness, style, architecture, and security. |
+
+### Usage
+
+With [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed, open a terminal in this repo and run `claude`. Then type any skill command:
+
+```
+> /lint
+> /test
+> /design-library ./example_data/trastuzumab_spm.csv 10
+> /pipeline --pdb-path ./example_data/1n8z.pdb
+> /review
+```
+
+You can also pass additional arguments after the skill name. For example:
+
+```
+> /test -k "test_run_protlib_designer[args0]"
+> /design-library ./my_scores.csv 20 --min-mut 3 --max-mut 5
+```
+
+> **Environment note:** Claude runs commands in the current shell environment. If `protlib-designer` is not found, activate your virtual environment before launching Claude (for example, `source .venv_test/bin/activate && claude`), or use explicit binaries like `./.venv_test/bin/protlib-designer`.
+
 ## Contributing
 
 Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.

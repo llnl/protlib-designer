@@ -11,4 +11,4 @@ ifold_scores.csv
 protlib_designer/_version.py
 *-prompt-results
 gpt-*
-.claude
+.claude/settings.local.json
