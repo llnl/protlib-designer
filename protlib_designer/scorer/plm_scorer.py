@@ -4,7 +4,11 @@ from typing import List
 
 from transformers import AutoModelForMaskedLM, AutoTokenizer
 
-from protlib_designer.utils import amino_acids, is_sequence_and_wildtype_dict_consistent
+from protlib_designer.utils import (
+    amino_acids,
+    is_sequence_and_wildtype_dict_consistent,
+    validate_canonical_sequence_and_wildtypes,
+)
 from protlib_designer.scorer.scorer import (
     score_function,
     from_user_input_to_scorer_input,
@@ -154,6 +158,8 @@ class PLMScorer(Scorer):
         # Get wildtype dict: {position: wildtype}
         wildtype_dict = {int(position[2:]): position[0] for position in positions}
 
+        validate_canonical_sequence_and_wildtypes(sequence, wildtype_dict)
+
         # Check if sequence and positions are consistent.
         if not is_sequence_and_wildtype_dict_consistent(sequence, wildtype_dict):
             raise ValueError(
@@ -253,9 +259,15 @@ class PLMScorer(Scorer):
             position_logps = logps[batch_idx][sequence_index].cpu().numpy()
             # Get the wildtype logp.
             wildtype_aa_id = self.tokenizer.convert_tokens_to_ids(wildtype_aa)
-            wildtype_aa_logp = position_logps[
-                self.aa_token_indices.index(wildtype_aa_id)
-            ]
+            try:
+                wildtype_aa_index = self.aa_token_indices.index(wildtype_aa_id)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Wildtype amino acid {wildtype_aa!r} at position {position_index} is not one of "
+                    f"the {len(amino_acids)} canonical residues this scorer supports "
+                    f"({''.join(amino_acids)}). Non-canonical residues (e.g. 'X') cannot be scored."
+                ) from exc
+            wildtype_aa_logp = position_logps[wildtype_aa_index]
             # Compute the scores.
             position_scores = list(
                 score_function(

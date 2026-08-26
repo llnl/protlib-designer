@@ -321,6 +321,36 @@ def extract_sequence_from_pdb(pdb_file: str, chain_id: str = "A") -> str:
     return ''.join(str(pep.get_sequence()) for pep in peptides)
 
 
+def validate_canonical_sequence_and_wildtypes(
+    sequence: str, wildtype_dict: dict
+) -> None:
+    """Reject non-canonical residues before scoring.
+
+    Parameters
+    ----------
+    sequence : str
+        Input amino-acid sequence.
+    wildtype_dict : dict
+        Mapping from 1-indexed positions to wildtype amino-acid letters.
+    """
+    canonical_amino_acids = set(amino_acids)
+    canonical_amino_acids_str = "".join(amino_acids)
+
+    for sequence_index, residue in enumerate(sequence, start=1):
+        if residue not in canonical_amino_acids:
+            raise ValueError(
+                f"Sequence contains non-canonical residue {residue!r} at position {sequence_index}. "
+                f"Only the 20 canonical amino acids are supported ({canonical_amino_acids_str})."
+            )
+
+    for position_index, wildtype_aa in sorted(wildtype_dict.items()):
+        if wildtype_aa not in canonical_amino_acids:
+            raise ValueError(
+                f"Positions reference non-canonical wildtype residue {wildtype_aa!r} at position {position_index}. "
+                f"Only the 20 canonical amino acids are supported ({canonical_amino_acids_str})."
+            )
+
+
 def is_sequence_and_wildtype_dict_consistent(
     sequence: str, wildtype_dict: dict
 ) -> bool:
