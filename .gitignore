@@ -12,3 +12,4 @@ protlib_designer/_version.py
 *-prompt-results
 gpt-*
 .claude/settings.local.json
+exclude_from_git
